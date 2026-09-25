@@ -5,7 +5,7 @@ knight is a circle, you kick by touching the ball, and positioning is everything
 19 slots of gear (over 500 trillion combinations), join a house, and play 4v4 (or 3v3) against squads of AI
 knights whose skill tiers change how they _think_, not just how fast they react.
 
-> **Play:** _link coming once deployed_ · TypeScript and the Canvas 2D API: no game engine, no framework, no
+> **Play:** [mob-ball.pages.dev](https://mob-ball.pages.dev/) · TypeScript and the Canvas 2D API: no game engine, no framework, no
 > image assets. About 24 KB of gzipped JavaScript.
 
 ## Features
