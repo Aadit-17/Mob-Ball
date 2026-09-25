@@ -3,7 +3,8 @@
  * Browser smoke test: builds the game, serves it, and plays a full match in headless Chromium.
  * Fails on any console error or warning, and reports the JS heap along the way.
  *
- *   npm run smoke            (first run: `npx playwright install chromium`)
+ *   npm run smoke                                   (first run: `npx playwright install chromium`)
+ *   SMOKE_URL=https://mob-ball.pages.dev npx tsx scripts/smoke.ts   (check a deployed site instead)
  */
 import { chromium, type Page } from 'playwright';
 import { preview } from 'vite';
@@ -19,7 +20,9 @@ async function heapMb(page: Page): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const server = await preview({ preview: { port: 4173, strictPort: true } });
+  const deployedUrl = process.env.SMOKE_URL;
+  const server = deployedUrl ? null : await preview({ preview: { port: 4173, strictPort: true } });
+  const baseUrl = deployedUrl ?? 'http://localhost:4173/';
   const browser = await chromium.launch();
   const problems: string[] = [];
   try {
@@ -29,7 +32,7 @@ async function main(): Promise<void> {
     });
     page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
 
-    await page.goto('http://localhost:4173/');
+    await page.goto(baseUrl);
     await page.getByRole('link', { name: /Read the chronicle/ }).click();
     await page.getByRole('heading', { level: 1, name: 'The Chronicle' }).waitFor();
     if ((await page.locator('.scroll').count()) === 0) throw new Error('Chronicle shows no releases');
@@ -74,6 +77,19 @@ async function main(): Promise<void> {
     if (bannerRenders > 2) throw new Error(`READY banner re-rendered ${bannerRenders} times during kick-off`);
     console.log(`match started · READY rendered ${bannerRenders}x · heap ${await heapMb(page)} MB`);
 
+    // Pause menu: continue, then restart from a fresh clock.
+    const pause = page.getByRole('button', { name: 'Pause (Esc)' });
+    await pause.click();
+    if (process.env.SMOKE_SHOTS) await page.screenshot({ path: `${process.env.SMOKE_SHOTS}/paused.png` });
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.waitForSelector('.overlay[hidden]', { state: 'attached' });
+    await page.waitForTimeout(1500);
+    await pause.click();
+    await page.getByRole('button', { name: 'Restart' }).click();
+    await page.waitForTimeout(300);
+    const clock = await page.locator('.clock').textContent();
+    if (clock !== '1:30') throw new Error(`Restart did not reset the clock (shows ${clock ?? 'nothing'})`);
+
     const started = Date.now();
     while (!(await page.locator('.overlay:not([hidden])').count())) {
       if (Date.now() - started > MATCH_TIMEOUT_MS) throw new Error('Match never reached full time');
@@ -89,9 +105,12 @@ async function main(): Promise<void> {
     await page.getByRole('button', { name: /Rematch/ }).click();
     await page.waitForSelector('.overlay[hidden]', { state: 'attached' });
     console.log(`rematch started · heap ${await heapMb(page)} MB`);
+    await page.getByRole('button', { name: 'Pause (Esc)' }).click();
+    await page.getByRole('button', { name: 'Quit to home' }).click();
+    await page.locator('.modes').waitFor();
   } finally {
     await browser.close();
-    server.httpServer.close();
+    server?.httpServer.close();
   }
   if (problems.length) throw new Error(`Console problems:\n${problems.join('\n')}`);
   console.log('smoke test passed');

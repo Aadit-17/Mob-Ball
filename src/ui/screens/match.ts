@@ -37,6 +37,8 @@ export function mountMatch(root: HTMLElement, app: AppContext): () => void {
 
 function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): () => void {
   const { homeHouse, awayHouse } = session;
+  // Assigned once the overlay exists; the HUD's pause button only calls it on click.
+  let togglePause = (): void => undefined;
   const state: MatchState = createMatch({ home: session.home, away: session.away, seed: randomSeed() });
   const duration = state.clock;
   const human = state.knights.find((k) => k.human);
@@ -76,6 +78,17 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           ),
           message,
           h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' })),
+          h('button', {
+            class: 'pause-btn',
+            text: 'II',
+            attrs: { type: 'button', 'aria-label': 'Pause (Esc)', title: 'Pause (Esc)' },
+            on: {
+              click: (e) => {
+                (e.currentTarget as HTMLButtonElement).blur();
+                togglePause();
+              },
+            },
+          }),
         ),
         overlay,
       ),
@@ -123,7 +136,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   };
 
   let paused = false;
-  const togglePause = (): void => {
+  togglePause = (): void => {
     if (state.phase === 'ended') return;
     paused = !paused;
     if (paused) {
@@ -132,9 +145,12 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         h(
           'div',
           { class: 'overlay-actions' },
-          button('Resume', togglePause, 'btn btn-go'),
-          button('Quit match', () => {
-            app.go(session.quitTo);
+          button('Continue', togglePause, 'btn btn-go'),
+          button('Restart', () => {
+            app.playMatch(session);
+          }),
+          button('Quit to home', () => {
+            app.go('home');
           }),
         ),
       );
