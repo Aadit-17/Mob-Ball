@@ -1,0 +1,383 @@
+:root {
+  --bg: #fff4e0;
+  --parchment: #fbf1dc;
+  --parchment-edge: #e9d7b3;
+  --ink: #2a1e3b;
+  --muted: #6d6380;
+  --red: #e8453c;
+  --orange: #f28c38;
+  --gold: #ffc93c;
+  --display: 'Lilita One', 'Arial Rounded MT Bold', system-ui, sans-serif;
+  --gothic: 'Pirata One', 'Lilita One', serif;
+  --gradient: linear-gradient(100deg, var(--red) 0%, var(--orange) 45%, var(--gold) 70%, var(--red) 100%);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  color: var(--ink);
+  font:
+    17px/1.6 Nunito,
+    system-ui,
+    sans-serif;
+  background:
+    repeating-linear-gradient(45deg, rgba(232, 69, 60, 0.035) 0 14px, transparent 14px 28px),
+    repeating-linear-gradient(-45deg, rgba(42, 30, 59, 0.03) 0 14px, transparent 14px 28px), var(--bg);
+}
+
+main {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 16px 72px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Gradient lettering with an ink drop shadow, the game's sticker look. */
+.gradient {
+  font-family: var(--display);
+  font-weight: 400;
+  line-height: 1.1;
+  background: var(--gradient);
+  background-size: 220% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  filter: drop-shadow(3px 3px 0 var(--ink));
+  animation: shimmer 7s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* header */
+.herald {
+  text-align: center;
+}
+
+.back {
+  display: inline-block;
+  font-weight: 800;
+  color: var(--ink);
+  text-decoration: none;
+  border: 2.5px solid var(--ink);
+  border-radius: 999px;
+  padding: 6px 16px;
+  background: #fff;
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.back:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+:focus-visible {
+  outline: 3px solid var(--red);
+  outline-offset: 3px;
+}
+
+.kicker {
+  font-family: var(--gothic);
+  font-size: 28px;
+  color: #8e1c24;
+  margin: 26px 0 0;
+  letter-spacing: 1px;
+}
+
+.title {
+  font-size: clamp(56px, 12vw, 104px);
+  margin: 0;
+  filter: drop-shadow(5px 5px 0 var(--ink));
+}
+
+.lede {
+  font-size: 19px;
+  color: var(--muted);
+  margin: 10px 0 18px;
+}
+
+.skyline {
+  width: min(100%, 560px);
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.pennant {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: flutter 2.6s ease-in-out infinite;
+}
+
+.pennant:nth-of-type(2n) {
+  animation-delay: -1.3s;
+}
+
+@keyframes flutter {
+  0%,
+  100% {
+    transform: skewY(0deg) scaleX(1);
+  }
+  50% {
+    transform: skewY(-6deg) scaleX(0.9);
+  }
+}
+
+/* legend */
+.legend {
+  list-style: none;
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  padding: 0;
+  margin: 26px 0 8px;
+  font-weight: 800;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.shield {
+  width: 26px;
+  height: 29px;
+  flex: none;
+}
+
+/* releases: each one a scroll with rolled ends and a wax seal */
+.releases {
+  list-style: none;
+  padding: 0;
+  margin: 28px 0 0;
+}
+
+.scroll {
+  position: relative;
+  margin: 34px 10px 0;
+  padding: 34px 34px 30px 118px;
+  background: linear-gradient(
+    90deg,
+    var(--parchment-edge) 0,
+    var(--parchment) 4%,
+    var(--parchment) 96%,
+    var(--parchment-edge) 100%
+  );
+  border: 3px solid var(--ink);
+  border-radius: 6px;
+  box-shadow: 6px 6px 0 var(--ink);
+}
+
+.scroll::before,
+.scroll::after {
+  content: '';
+  position: absolute;
+  left: -12px;
+  right: -12px;
+  height: 22px;
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #f6e6c4, #d8c196);
+}
+
+.scroll::before {
+  top: -14px;
+}
+
+.scroll::after {
+  bottom: -14px;
+}
+
+.seal {
+  position: absolute;
+  top: 26px;
+  left: 18px;
+  width: 84px;
+  height: 84px;
+  transform: rotate(-12deg);
+  filter: drop-shadow(2px 3px 0 rgba(42, 30, 59, 0.35));
+}
+
+.seal text {
+  font: 400 30px var(--gothic);
+  fill: #ffe8c2;
+}
+
+.ribbon {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 3px 16px;
+  font-family: var(--gothic);
+  font-size: 20px;
+  color: #fff8e8;
+  background: #8e1c24;
+  border: 2.5px solid var(--ink);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 50%, 100% 100%, 0 100%, 10px 50%);
+  padding-left: 22px;
+  padding-right: 24px;
+}
+
+.latest {
+  font:
+    800 12px Nunito,
+    sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  background: var(--gold);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.scroll h2 {
+  font-size: clamp(32px, 6vw, 46px);
+  margin: 0 0 8px;
+}
+
+.summary {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+
+.tally {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.changes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.change {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding-top: 12px;
+  border-top: 2px dashed rgba(42, 30, 59, 0.18);
+}
+
+.change .shield {
+  margin-top: 1px;
+}
+
+.divider {
+  display: flex;
+  justify-content: center;
+  margin-top: 30px;
+}
+
+.swords {
+  width: 64px;
+  height: 64px;
+}
+
+/* horizon */
+.horizon {
+  margin-top: 64px;
+  text-align: center;
+}
+
+.horizon h2 {
+  font-size: 40px;
+  margin: 0 0 16px;
+}
+
+.horizon ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+  text-align: left;
+}
+
+.horizon li {
+  border: 3px dashed var(--ink);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.horizon b {
+  display: block;
+  font: 400 22px var(--display);
+}
+
+.horizon span {
+  display: block;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.horizon em {
+  display: block;
+  margin-top: 6px;
+  font-style: normal;
+  font-weight: 800;
+  font-size: 13px;
+  color: #8e1c24;
+}
+
+.colophon {
+  margin-top: 48px;
+  text-align: center;
+  font-family: var(--gothic);
+  font-size: 20px;
+  color: var(--muted);
+}
+
+@media (max-width: 620px) {
+  .scroll {
+    padding: 100px 20px 26px;
+  }
+
+  .seal {
+    left: 50%;
+    top: 14px;
+    margin-left: -42px;
+  }
+
+  .scroll-head {
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gradient,
+  .pennant {
+    animation: none;
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "mob-ball",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Top-down medieval football in the style of HaxBall, with a deep knight forge and tiered AI.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "balance": "vitest run --config scripts/vitest.config.ts --reporter=verbose -t 'balance report'",
+    "smoke": "vite build && tsx scripts/smoke.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^22.20.4",
+    "eslint": "^9.39.5",
+    "globals": "^16.5.0",
+    "playwright": "^1.63.0",
+    "prettier": "^3.9.9",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.70.1",
+    "vite": "^8.3.1",
+    "vitest": "^4.1.11"
+  }
+}
