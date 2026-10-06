@@ -227,6 +227,14 @@ button {
   margin: 4px 0 0;
 }
 
+.home-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+
 .home-hero .btn {
   margin: 8px 0 4px;
 }
@@ -684,13 +692,10 @@ button {
   background: conic-gradient(var(--sun) calc(var(--p, 1) * 360deg), rgba(255, 255, 255, 0.5) 0);
 }
 
-.pause-btn {
-  position: absolute;
-  top: 8px;
-  right: 10px;
+.icon-btn {
   width: 40px;
   height: 40px;
-  pointer-events: auto;
+  flex: none;
   font: 400 18px var(--display);
   letter-spacing: 1px;
   color: var(--ink);
@@ -701,8 +706,30 @@ button {
   cursor: pointer;
 }
 
-.pause-btn:hover {
+.icon-btn:hover {
   background: var(--sun);
+}
+
+.hud .icon-btn {
+  position: absolute;
+  top: 8px;
+  pointer-events: auto;
+}
+
+.pause-btn {
+  right: 10px;
+}
+
+.mute-btn {
+  right: 60px;
+}
+
+/* Stacked under pause on narrow screens, where beside it would cover the scoreboard. */
+@media (max-width: 640px) {
+  .hud .mute-btn {
+    top: 56px;
+    right: 10px;
+  }
 }
 
 .overlay {

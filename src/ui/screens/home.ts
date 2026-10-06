@@ -1,4 +1,6 @@
 import type { AppContext } from '../../app';
+import { muteButton } from '../../audio/mute-button';
+import { sound } from '../../audio/sound';
 import { LATEST } from '../../changelog/releases';
 import { MODES } from '../../modes';
 import type { GameMode } from '../../modes/mode';
@@ -24,6 +26,8 @@ function modeCard(mode: GameMode, app: AppContext): HTMLElement {
 }
 
 export function mountHome(root: HTMLElement, app: AppContext): () => void {
+  // Home is always the first screen, so this covers every screen after it.
+  sound.attach();
   const portrait = h('canvas', {
     class: 'home-portrait',
     attrs: { 'aria-label': `${app.look.name}, your knight` },
@@ -59,10 +63,15 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
         ),
         h('div', { class: 'modes' }, ...MODES.map((mode) => modeCard(mode, app))),
       ),
-      h('p', {
-        class: 'hint',
-        text: 'WASD or arrows to run · Space to kick · Shift to barge. Best with a keyboard.',
-      }),
+      h(
+        'div',
+        { class: 'home-foot' },
+        h('p', {
+          class: 'hint',
+          text: 'WASD or arrows to run · Space to kick · Shift to barge. Best with a keyboard.',
+        }),
+        muteButton('Mute sound', 'icon-btn'),
+      ),
     ),
   );
   drawPortrait(portrait, app.look, app.house.colour, { width: 220, height: 240 });

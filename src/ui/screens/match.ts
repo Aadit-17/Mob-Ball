@@ -1,5 +1,7 @@
 import type { AppContext } from '../../app';
 import { BotBrain } from '../../ai/brain';
+import { muteButton } from '../../audio/mute-button';
+import { sound } from '../../audio/sound';
 import { KNIGHT, MATCH, STEP } from '../../game/constants';
 import { createMatch, knightById, stepMatch } from '../../game/match';
 import { randomSeed } from '../../game/rng';
@@ -56,6 +58,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   const message = h('div', { class: 'msg', attrs: { 'aria-live': 'polite' } });
   const bargeRing = h('div', { class: 'ring' });
   const overlay = h('div', { class: 'overlay', attrs: { hidden: '' } });
+  const mute = muteButton('Mute (M)', 'icon-btn mute-btn');
+  mute.addEventListener('click', () => {
+    mute.blur();
+  });
 
   root.append(
     h(
@@ -78,8 +84,9 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           ),
           message,
           h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' })),
+          mute,
           h('button', {
-            class: 'pause-btn',
+            class: 'icon-btn pause-btn',
             text: 'II',
             attrs: { type: 'button', 'aria-label': 'Pause (Esc)', title: 'Pause (Esc)' },
             on: {
@@ -94,7 +101,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       ),
       h('p', {
         class: 'hint',
-        text: 'WASD / arrows run · Space kick (hold to kick on contact) · Shift or E barge · Esc pause',
+        text: 'WASD / arrows run · Space kick (hold to kick on contact) · Shift or E barge · Esc pause · M mute',
       }),
     ),
   );
@@ -111,6 +118,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
 
   const onEvent = (event: MatchEvent): void => {
     effects.handle(event);
+    sound.handle(event);
     if (event.type === 'goal') {
       const scorer = knightById(state, event.scorerId);
       const minute = footballMinute(duration - state.clock, duration, state.goldenGoal);
@@ -158,6 +166,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   };
   const keyboard = new Keyboard((key) => {
     if (key === 'Escape' || key === 'p') togglePause();
+    else if (key === 'm') mute.click();
   });
 
   function showOverlay(...children: HTMLElement[]): void {
@@ -215,6 +224,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       if (state.phase === 'kickoff' && lastPhase !== 'kickoff') {
         say(big('READY?'), MATCH.kickoffPause - state.phaseTime);
       } else if (elapsed > messageUntil) message.innerHTML = '';
+      if (state.phase === 'play' && lastPhase === 'kickoff') sound.play('whistle');
       lastPhase = state.phase;
       camera.follow(state.ball, human, dt);
       effects.update(dt, state);
@@ -237,5 +247,6 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   return () => {
     cancelAnimationFrame(frame);
     keyboard.dispose();
+    sound.stopMatch();
   };
 }

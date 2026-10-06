@@ -3,6 +3,7 @@ import { normalizeLook, type Look } from './knight/look';
 
 const LOOK_KEY = 'mobball.look.v2';
 const SETTINGS_KEY = 'mobball.settings.v1';
+const MUTED_KEY = 'mobball.muted.v1';
 
 export interface Preferences {
   houseId: string;
@@ -59,4 +60,9 @@ export function loadPreferences(): Preferences {
 
 export const savePreferences = (prefs: Preferences): void => {
   write(SETTINGS_KEY, prefs);
+};
+
+export const loadMuted = (): boolean => read(MUTED_KEY) === true;
+export const saveMuted = (muted: boolean): void => {
+  write(MUTED_KEY, muted);
 };

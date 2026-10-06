@@ -6,7 +6,7 @@
  *   npm run smoke                                   (first run: `npx playwright install chromium`)
  *   SMOKE_URL=https://mob-ball.pages.dev npx tsx scripts/smoke.ts   (check a deployed site instead)
  */
-import { chromium, type Page } from 'playwright';
+import { chromium, type Locator, type Page } from 'playwright';
 import { preview } from 'vite';
 
 const MATCH_TIMEOUT_MS = 240_000;
@@ -17,6 +17,11 @@ async function heapMb(page: Page): Promise<string> {
   await cdp.send('HeapProfiler.collectGarbage');
   const { usedSize } = await cdp.send('Runtime.getHeapUsage');
   return (usedSize / 1048576).toFixed(1);
+}
+
+async function expectPressed(button: Locator, expected: string, failure: string): Promise<void> {
+  const actual = await button.getAttribute('aria-pressed');
+  if (actual !== expected) throw new Error(`${failure} (aria-pressed=${actual ?? 'missing'})`);
 }
 
 async function main(): Promise<void> {
@@ -77,6 +82,14 @@ async function main(): Promise<void> {
     if (bannerRenders > 2) throw new Error(`READY banner re-rendered ${bannerRenders} times during kick-off`);
     console.log(`match started · READY rendered ${bannerRenders}x · heap ${await heapMb(page)} MB`);
 
+    // Mute toggles by button and by the M key; the match then plays on with sound.
+    const mute = page.getByRole('button', { name: 'Mute (M)' });
+    await expectPressed(mute, 'false', 'Sound should start on');
+    await mute.click();
+    await expectPressed(mute, 'true', 'Mute button did not mute');
+    await page.keyboard.press('m');
+    await expectPressed(mute, 'false', 'M key did not unmute');
+
     // Pause menu: continue, then restart from a fresh clock.
     const pause = page.getByRole('button', { name: 'Pause (Esc)' });
     await pause.click();
@@ -108,6 +121,11 @@ async function main(): Promise<void> {
     await page.getByRole('button', { name: 'Pause (Esc)' }).click();
     await page.getByRole('button', { name: 'Quit to home' }).click();
     await page.locator('.modes').waitFor();
+
+    // Muting on the home screen survives a reload.
+    await page.getByRole('button', { name: 'Mute sound' }).click();
+    await page.reload();
+    await expectPressed(page.getByRole('button', { name: 'Mute sound' }), 'true', 'Mute was not remembered');
   } finally {
     await browser.close();
     server?.httpServer.close();
