@@ -283,7 +283,7 @@ function keep(ctx: Context): Plan {
     const p = carry(ctx);
     return { ...p, x: Math.min(p.x, PITCH.left + 280) };
   }
-  const out = 58;
+  const out = 40;
   return {
     x: Math.max(PITCH.left + 26, PITCH.left + (gx / gd) * out),
     y: clamp(PITCH.centerY + (gy / gd) * out, PITCH.goalTop - 20, PITCH.goalBottom + 20),

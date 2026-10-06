@@ -71,7 +71,8 @@ function drawMarkings(b: Ctx): void {
   circle(b, centerX, centerY, 4);
   b.fill();
   const boxW = 110;
-  const boxH = 280;
+  // The box stays 35px clear of each post whatever the goal size.
+  const boxH = PITCH.goalBottom - PITCH.goalTop + 70;
   b.strokeRect(left + 2, centerY - boxH / 2, boxW, boxH);
   b.strokeRect(right - boxW - 2, centerY - boxH / 2, boxW, boxH);
   const arc = Math.PI / 2.6;

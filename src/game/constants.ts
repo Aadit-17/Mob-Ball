@@ -10,8 +10,8 @@ export const PITCH = {
   bottom: 590,
   centerX: 630,
   centerY: 330,
-  goalTop: 225,
-  goalBottom: 435,
+  goalTop: 205,
+  goalBottom: 455,
   goalDepth: 36,
   /** How far knights may stray past the touchlines. */
   runoff: 22,
