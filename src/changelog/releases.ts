@@ -21,6 +21,27 @@ export interface Release {
 
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.1',
+    date: '2026-10-06',
+    title: 'Hear the mob',
+    summary: 'The game finds its voice, and the goals get wider.',
+    changes: [
+      {
+        kind: 'new',
+        text: 'Sound: kicks that thump (harder for power shots), barge BONKs, whistles for kick-off and full time, and a crowd that roars for every goal.',
+      },
+      {
+        kind: 'new',
+        text: 'A mute button in matches and on the home screen, remembered between visits. Press M to toggle mid-match.',
+      },
+      { kind: 'new', text: 'A pause button in matches, with continue, restart and quit to home.' },
+      {
+        kind: 'improved',
+        text: 'Wider goals and keepers who stand a little deeper, so attacks end in more goals.',
+      },
+    ],
+  },
+  {
     version: '0',
     date: '2026-09-26',
     title: 'The gates open',
