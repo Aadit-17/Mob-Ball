@@ -4,11 +4,11 @@
  */
 import { it } from 'vitest';
 import { BotBrain } from '../src/ai/brain';
-import { TOP_TIER } from '../src/ai/skills';
+import { TIERS, TOP_TIER } from '../src/ai/skills';
 import { PITCH } from '../src/game/constants';
 import { createMatch, stepMatch, type KnightSpec } from '../src/game/match';
 import { createRng } from '../src/game/rng';
-import type { Knight, MatchState, TeamId } from '../src/game/types';
+import type { Knight, MatchState, Role, TeamId } from '../src/game/types';
 import { DEFAULT_LOOK } from '../src/knight/look';
 import { createSquads } from '../src/setup/squads';
 
@@ -18,6 +18,10 @@ const PLAYER_TIER = 2;
 const RIVAL_MEAN_TIERS = [1, 2, 3] as const;
 /** Kicks from further out than this are passes or clearances, not shots. */
 const SHOT_DISTANCE = 500;
+/** Below this speed an outfield bot counts as standing still (top speed is ~230 px/s). */
+const IDLE_SPEED = 25;
+/** The last toucher still has the ball while it is this close to him. */
+const CARRY_DISTANCE = 60;
 
 type Outcome = 'goal' | 'keeper' | 'blocked' | 'died';
 
@@ -26,11 +30,78 @@ interface Shot {
   outcome: Outcome;
 }
 
+const SITUATIONS = ['defending', 'attacking', 'loose'] as const;
+type Situation = (typeof SITUATIONS)[number];
+const OUTFIELD = ['def', 'mid', 'fwd'] as const;
+
+interface Idle {
+  frames: number;
+  idle: number;
+}
+
+interface Mean {
+  frames: number;
+  total: number;
+}
+
+interface Movement {
+  byTier: Map<string, Idle>;
+  byRole: Map<Role, Idle>;
+  bySituation: Map<`${Role} ${Situation}`, Idle>;
+  /** Distance from the carrier to the nearest rival, by the defending team. */
+  pressure: [Mean, Mean];
+}
+
 interface Tally {
   goals: [number, number];
   ownGoals: number;
   playerGoals: number;
   shots: Shot[];
+  movement: Movement;
+}
+
+const newMovement = (): Movement => ({
+  byTier: new Map(),
+  byRole: new Map(),
+  bySituation: new Map(),
+  pressure: [
+    { frames: 0, total: 0 },
+    { frames: 0, total: 0 },
+  ],
+});
+
+function count<K>(map: Map<K, Idle>, key: K, idle: boolean): void {
+  const entry = map.get(key) ?? { frames: 0, idle: 0 };
+  entry.frames++;
+  if (idle) entry.idle++;
+  map.set(key, entry);
+}
+
+/** Per live frame: which outfield bots are standing still, and how close the carrier's nearest rival is. */
+function measure(state: MatchState, movement: Movement): void {
+  if (state.phase !== 'play') return;
+  const { ball } = state;
+  const toucher = state.knights.find((k) => k.id === ball.lastTouch);
+  const carrier =
+    toucher && Math.hypot(toucher.x - ball.x, toucher.y - ball.y) < CARRY_DISTANCE ? toucher : null;
+  for (const k of state.knights) {
+    if (k.role === 'gk' || k.human) continue;
+    const idle = Math.hypot(k.vx, k.vy) < IDLE_SPEED;
+    const situation: Situation = !carrier ? 'loose' : carrier.team === k.team ? 'attacking' : 'defending';
+    count(movement.byTier, TIERS[k.tier]?.name ?? String(k.tier), idle);
+    count(movement.byRole, k.role, idle);
+    count(movement.bySituation, `${k.role} ${situation}`, idle);
+  }
+  if (carrier) {
+    const nearest = Math.min(
+      ...state.knights
+        .filter((k) => k.team !== carrier.team)
+        .map((k) => Math.hypot(k.x - carrier.x, k.y - carrier.y)),
+    );
+    const p = movement.pressure[carrier.team === 0 ? 1 : 0];
+    p.frames++;
+    p.total += nearest;
+  }
 }
 
 /** Whether a kick is heading into the opponent's goal mouth from shooting distance. */
@@ -62,6 +133,7 @@ function playMatch(seed: number, meanTier: number, tally: Tally): void {
 
   while (state.phase !== 'ended') {
     stepMatch(state, (k) => brain.input(state, k));
+    measure(state, tally.movement);
     for (const e of state.events) {
       if (e.type === 'kick') {
         const kicker = state.knights.find((k) => k.id === e.knightId);
@@ -92,18 +164,43 @@ function playMatch(seed: number, meanTier: number, tally: Tally): void {
 
 const per = (n: number): string => (n / MATCHES).toFixed(2);
 const pct = (n: number, of: number): string => (of ? `${Math.round((100 * n) / of)}%` : '-');
+const idleLine = <K extends string>(map: Map<K, Idle>, order: readonly K[]): string =>
+  order
+    .filter((k) => map.has(k))
+    .map((k) => `${k} ${pct(map.get(k)?.idle ?? 0, map.get(k)?.frames ?? 0)}`)
+    .join(' · ');
+const avg = (p: Mean): string => (p.frames ? `${Math.round(p.total / p.frames)}px` : '-');
+
+function movementLines(m: Movement): string[] {
+  return [
+    `    idle by tier: ${idleLine(
+      m.byTier,
+      TIERS.map((t) => t.name),
+    )}`,
+    `    idle by role: ${idleLine(m.byRole, OUTFIELD)}`,
+    ...OUTFIELD.map(
+      (r) =>
+        `      ${r}: ${idleLine(
+          m.bySituation,
+          SITUATIONS.map((s) => `${r} ${s}` as const),
+        )}`,
+    ),
+    `    pressure (carrier to nearest rival): by us ${avg(m.pressure[0])} · by them ${avg(m.pressure[1])}`,
+  ];
+}
 
 it('balance report', () => {
   const lines = [`${MATCHES} matches per row · 4v4 · player slot = tier ${PLAYER_TIER} bot`];
   for (const meanTier of RIVAL_MEAN_TIERS) {
-    const tally: Tally = { goals: [0, 0], ownGoals: 0, playerGoals: 0, shots: [] };
+    const tally: Tally = { goals: [0, 0], ownGoals: 0, playerGoals: 0, shots: [], movement: newMovement() };
     for (let i = 0; i < MATCHES; i++) playMatch(1000 * meanTier + i, meanTier, tally);
     const n = tally.shots.length;
-    const count = (o: Outcome): number => tally.shots.filter((s) => s.outcome === o).length;
+    const outcomes = (o: Outcome): number => tally.shots.filter((s) => s.outcome === o).length;
     lines.push(
       `rivals~${meanTier}  goals ${per(tally.goals[0] + tally.goals[1])} (us ${per(tally.goals[0])}, them ${per(tally.goals[1])}, ` +
         `player ${per(tally.playerGoals)}, own ${per(tally.ownGoals)})  shots ${per(n)} → ` +
-        `goal ${pct(count('goal'), n)} · keeper ${pct(count('keeper'), n)} · blocked ${pct(count('blocked'), n)} · died ${pct(count('died'), n)}`,
+        `goal ${pct(outcomes('goal'), n)} · keeper ${pct(outcomes('keeper'), n)} · blocked ${pct(outcomes('blocked'), n)} · died ${pct(outcomes('died'), n)}`,
+      ...movementLines(tally.movement),
     );
   }
   console.log(`\n${lines.join('\n')}\n`);

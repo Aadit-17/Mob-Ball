@@ -16,6 +16,13 @@ export interface Skill {
   readonly anticipation: 'none' | 'linear' | 'bounces';
   /** swarm: everyone chases. roles: hold a position. support: push up, offer width, make runs. */
   readonly positioning: 'swarm' | 'roles' | 'support';
+  /**
+   * The second-nearest defender's job while the rivals have the ball: none (only the nearest presses),
+   * mark the most advanced attacker goal-side, or cut the passing lane to the most dangerous one.
+   */
+  readonly cover: 'none' | 'mark' | 'lane';
+  /** How many go for a loose ball; a second one waits goal-side of it for the rebound. */
+  readonly contest: 1 | 2;
   readonly passing: 'never' | 'when-blocked' | 'open-lanes' | 'through-balls';
   /** Dribble until this close to goal, then shoot. */
   readonly shotRange: number;
@@ -37,6 +44,8 @@ export const TIERS: readonly Skill[] = [
     aimError: 0.3,
     anticipation: 'none',
     positioning: 'swarm',
+    cover: 'none',
+    contest: 1,
     passing: 'never',
     shotRange: Infinity,
     aimsOpenSide: false,
@@ -53,6 +62,8 @@ export const TIERS: readonly Skill[] = [
     aimError: 0.18,
     anticipation: 'linear',
     positioning: 'roles',
+    cover: 'none',
+    contest: 1,
     passing: 'when-blocked',
     shotRange: 420,
     aimsOpenSide: false,
@@ -69,6 +80,8 @@ export const TIERS: readonly Skill[] = [
     aimError: 0.1,
     anticipation: 'linear',
     positioning: 'support',
+    cover: 'mark',
+    contest: 1,
     passing: 'open-lanes',
     shotRange: 300,
     aimsOpenSide: true,
@@ -85,6 +98,8 @@ export const TIERS: readonly Skill[] = [
     aimError: 0.05,
     anticipation: 'bounces',
     positioning: 'support',
+    cover: 'lane',
+    contest: 2,
     passing: 'open-lanes',
     shotRange: 270,
     aimsOpenSide: true,
@@ -101,6 +116,8 @@ export const TIERS: readonly Skill[] = [
     aimError: 0.025,
     anticipation: 'bounces',
     positioning: 'support',
+    cover: 'lane',
+    contest: 2,
     passing: 'through-balls',
     shotRange: 260,
     aimsOpenSide: true,

@@ -21,6 +21,13 @@ export function laneBlocked(from: Vec, to: Vec, obstacles: readonly Circle[], ma
   });
 }
 
+/** The point `distance` along the way from `from` to `to`, stopping at `to`. */
+export function toward(from: Vec, to: Vec, distance: number): Vec {
+  const d = Math.hypot(to.x - from.x, to.y - from.y);
+  const t = d > 0 ? Math.min(1, distance / d) : 0;
+  return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+}
+
 export interface BankShot {
   /** Point to kick toward: the target mirrored through the wall. */
   aim: Vec;

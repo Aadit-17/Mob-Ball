@@ -4,6 +4,7 @@ import { createMatch, stepMatch } from '../game/match';
 import { NO_INPUT } from '../game/types';
 import { spec } from '../test/fixtures';
 import { BotBrain } from './brain';
+import { laneBlocked } from './geometry';
 import { TIERS, TOP_TIER } from './skills';
 
 /** A bot on the ball with it pinned against the top touchline and a rival closing in. */
@@ -114,6 +115,100 @@ describe('forward runs', () => {
       stepMatch(state, (k) => (k === runner ? brain.input(state, k) : NO_INPUT));
     expect(runner.x).toBeGreaterThan(state.ball.x + 60);
     expect(Math.hypot(runner.x - defender.x, runner.y - defender.y)).toBeGreaterThan(90);
+  });
+});
+
+/**
+ * The rivals counter-attack through our half: their forward has the ball at his feet, their midfielder
+ * has broken toward our goal and their defender waits behind the ball as an outlet. Only our bots move.
+ */
+function counterAttack(tier: number) {
+  const roles = ['gk', 'def', 'mid', 'fwd'] as const;
+  const state = createMatch({
+    home: roles.map((r) => spec(r, { tier })),
+    away: roles.map((r) => spec(r, { tier: 0 })),
+    seed: 9,
+  });
+  state.phase = 'play';
+  const [, def, mid, fwd, , theirDef, theirMid, carrier] = state.knights;
+  if (!def || !mid || !fwd || !theirDef || !theirMid || !carrier) throw new Error('missing knights');
+  Object.assign(carrier, { x: 620, y: 450 });
+  Object.assign(state.ball, { x: 620 - carrier.radius - BALL.radius - 1, y: 450, vx: 0, vy: 0 });
+  state.ball.lastTouch = carrier.id;
+  Object.assign(theirMid, { x: 300, y: 220 });
+  Object.assign(theirDef, { x: 850, y: 500 });
+  Object.assign(def, { x: 380, y: 380 });
+  Object.assign(mid, { x: 600, y: 300 });
+  Object.assign(fwd, { x: 640, y: 250 });
+  const outfield = [def, mid, fwd];
+  const ball0 = { x: state.ball.x, y: state.ball.y };
+  /** Distance from a point to the pass from the ball to their midfielder, the most dangerous one. */
+  const toLane = (p: { x: number; y: number }): number => {
+    const [dx, dy] = [theirMid.x - ball0.x, theirMid.y - ball0.y];
+    const t = Math.max(0, Math.min(1, ((p.x - ball0.x) * dx + (p.y - ball0.y) * dy) / (dx * dx + dy * dy)));
+    return Math.hypot(p.x - (ball0.x + dx * t), p.y - (ball0.y + dy * t));
+  };
+  const laneStart = outfield.map(toLane);
+  const nearestToBall = outfield.map(() => Infinity);
+  let laneAt = outfield.map(() => 0);
+  let laneCut = false;
+  const brain = new BotBrain();
+  for (let t = 0; t < 1.2; t += STEP) {
+    stepMatch(state, (k) => (k.team === 0 ? brain.input(state, k) : NO_INPUT));
+    outfield.forEach((k, i) => {
+      nearestToBall[i] = Math.min(
+        nearestToBall[i] ?? Infinity,
+        Math.hypot(k.x - state.ball.x, k.y - state.ball.y),
+      );
+    });
+    if (Math.abs(t - 0.6) < STEP / 2) laneAt = outfield.map(toLane);
+    laneCut ||= laneBlocked(ball0, theirMid, [fwd, def], BALL.radius + 6);
+  }
+  const pressers = nearestToBall.filter((d) => d < 60).length;
+  const closingOnLane = outfield.filter(
+    (_, i) => (nearestToBall[i] ?? 0) >= 60 && (laneStart[i] ?? 0) - (laneAt[i] ?? 0) > 40,
+  ).length;
+  return { pressers, closingOnLane, laneCut };
+}
+
+describe('defending', () => {
+  it('Legends press the carrier with the nearest and send a second to cut the most dangerous pass', () => {
+    const { pressers, closingOnLane, laneCut } = counterAttack(TOP_TIER);
+    expect(pressers).toBe(1);
+    expect(closingOnLane).toBeGreaterThanOrEqual(1);
+    expect(laneCut).toBe(true);
+  });
+
+  it('Squires press with the nearest only', () => {
+    expect(counterAttack(1).pressers).toBe(1);
+  });
+});
+
+describe('moving off the ball', () => {
+  it('a Legend midfielder whose teammate has the ball keeps making runs instead of parking on one', () => {
+    const state = createMatch({
+      home: [spec('mid', { tier: TOP_TIER }), spec('fwd', { human: true })],
+      away: [spec('def', { tier: 0 })],
+      seed: 4,
+    });
+    state.phase = 'play';
+    const [runner, carrier, defender] = state.knights;
+    if (!runner || !carrier || !defender) throw new Error('missing knights');
+    Object.assign(carrier, { x: 560, y: PITCH.centerY });
+    Object.assign(state.ball, { x: 560 + carrier.radius + BALL.radius + 1, y: PITCH.centerY });
+    state.ball.lastTouch = carrier.id;
+    Object.assign(runner, { x: 450, y: PITCH.centerY + 120 });
+    Object.assign(defender, { x: 760, y: PITCH.centerY });
+    const brain = new BotBrain();
+    let frames = 0;
+    let idle = 0;
+    for (let t = 0; t < 4; t += STEP) {
+      stepMatch(state, (k) => (k === runner ? brain.input(state, k) : NO_INPUT));
+      if (t < 1) continue;
+      frames++;
+      if (Math.hypot(runner.vx, runner.vy) < 25) idle++;
+    }
+    expect(idle / frames).toBeLessThan(0.1);
   });
 });
 

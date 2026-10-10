@@ -1,7 +1,7 @@
 import { BALL, PITCH, STEP } from '../game/constants';
 import type { Input, Knight, MatchState } from '../game/types';
 import { clamp, dist, type Vec } from '../game/vec';
-import { bankShot, laneBlocked, predictBall } from './geometry';
+import { bankShot, laneBlocked, predictBall, toward } from './geometry';
 import { skillFor, type Skill } from './skills';
 
 /** Keepers react a little slower than outfielders of the same tier, or nobody could ever score. */
@@ -33,6 +33,16 @@ interface Memory {
   run: Vec | null;
   /** When this bot started dribbling to open a shooting lane (match phase time), if it is. */
   openingSince: number | null;
+  /** When the current run was picked (match phase time). */
+  runSince: number;
+  /** What this bot did off the ball last decision: went for it as the nearest, or covered as the second. */
+  duty: 'press' | 'cover' | null;
+  /** Id of the opponent this bot is marking or screening off the ball, if any. */
+  mark: number | null;
+  /** Whether this bot is playing as the team in possession, and the last raw reading and since when. */
+  ours: boolean;
+  seenOurs: boolean;
+  seenSince: number | null;
 }
 
 /** A knight or the ball as seen by one bot: mirrored so its own team always attacks to the right. */
@@ -54,6 +64,10 @@ interface Context {
   readonly mates: readonly Seen[];
   readonly opponents: readonly Seen[];
   readonly ballDistance: number;
+  /** The knight with the ball at its feet, if anyone has it. */
+  readonly carrier: Knight | null;
+  /** Whether this bot's team has the ball, or touched it last while it is loose, once that has settled. */
+  readonly ours: boolean;
   /** Per-decision aim wobble, in radians. */
   readonly aimJitter: number;
 }
@@ -66,7 +80,20 @@ export class BotBrain {
     const skill = skillFor(self.tier);
     let memory = this.memory.get(self.id);
     if (!memory) {
-      memory = { hold: 0, plan: null, shotY: null, lift: null, run: null, openingSince: null };
+      memory = {
+        hold: 0,
+        plan: null,
+        shotY: null,
+        lift: null,
+        run: null,
+        openingSince: null,
+        runSince: 0,
+        duty: null,
+        mark: null,
+        ours: false,
+        seenOurs: false,
+        seenSince: null,
+      };
       this.memory.set(self.id, memory);
     }
     memory.hold -= dt;
@@ -92,6 +119,33 @@ export class BotBrain {
 }
 
 const mirrorX = (team: number, x: number): number => (team === 0 ? x : PITCH.width - x);
+
+/** The last toucher still has the ball while it is this close to him. */
+const CARRY_REACH = 60;
+/** Gap between a knight's edge and the ball inside which it has the ball, touched or not. */
+const CONTROL_GAP = 12;
+
+/** Seconds a change of possession must last before off-ball bots switch between attacking and defending. */
+const TRANSITION_SETTLE = 0.3;
+
+/** Debounced possession, so a scramble of alternating touches doesn't send the team back and forth. */
+function settledPossession(memory: Memory, ours: boolean, now: number): boolean {
+  if (memory.seenSince === null) memory.ours = ours;
+  if (memory.seenSince === null || ours !== memory.seenOurs || now < memory.seenSince) {
+    memory.seenOurs = ours;
+    memory.seenSince = now;
+  }
+  if (now - memory.seenSince >= TRANSITION_SETTLE) memory.ours = ours;
+  return memory.ours;
+}
+
+/** Who has the ball: its last toucher while still close to it, otherwise any knight touching it. */
+function carrierOf(state: MatchState): Knight | null {
+  const { ball, knights } = state;
+  const toucher = knights.find((k) => k.id === ball.lastTouch);
+  if (toucher && dist(toucher, ball) < CARRY_REACH) return toucher;
+  return knights.find((k) => dist(k, ball) < k.radius + ball.radius + CONTROL_GAP) ?? null;
+}
 
 /** Within this distance of its own goal line, a bot takes care not to push the ball goalward. */
 const OWN_GOAL_DANGER = 360;
@@ -151,6 +205,8 @@ function buildContext(state: MatchState, self: Knight, skill: Skill, memory: Mem
     lead = { x: mirrorX(self.team, p.x), y: p.y };
   }
   const me = see(self, self);
+  const carrier = carrierOf(state);
+  const toucher = carrier ?? state.knights.find((k) => k.id === state.ball.lastTouch);
   return {
     state,
     self,
@@ -162,6 +218,8 @@ function buildContext(state: MatchState, self: Knight, skill: Skill, memory: Mem
     mates: state.knights.filter((k) => k.team === self.team && k !== self).map((k) => see(k, k)),
     opponents: state.knights.filter((k) => k.team !== self.team).map((k) => see(k, k)),
     ballDistance: dist(me, ball),
+    carrier,
+    ours: settledPossession(memory, toucher?.team === self.team, state.phaseTime),
     aimJitter: (state.rng.next() * 2 - 1) * skill.aimError,
   };
 }
@@ -181,64 +239,162 @@ function isClosest(ctx: Context, among: readonly Seen[]): boolean {
 
 const outfieldMates = (ctx: Context): Seen[] => ctx.mates.filter((m) => m.knight?.role !== 'gk');
 
+const OWN_GOAL: Vec = { x: PITCH.left, y: PITCH.centerY };
+/** A presser or cover keeps the job until a teammate is this much nearer the ball, so two don't keep swapping. */
+const DUTY_HYSTERESIS = 20;
+/** How far goal-side of a loose ball the second man waits for the rebound. */
+const SECOND_BALL_GAP = 70;
+/** How far goal-side of an attacker a marker stands. */
+const MARK_GAP = 34;
+/** How far along the lane from the ball to the attacker a lane cover stands. */
+const LANE_CUT = 0.55;
+/** How much a clear pass to an attacker adds to his danger, in px of closeness to goal. */
+const OPEN_LANE_DANGER = 160;
+/** How far goal-side of the ball the midfielder screens. */
+const SCREEN_GAP = 110;
+/** How far behind the ball the defender holds the line, unless an attacker has run in behind. */
+const LINE_DEPTH = 200;
+/** An attacker this far nearer our goal than the ball has run in behind and gets marked. */
+const IN_BEHIND = 40;
+/** How far along the lane to the carrier's outlet the forward stands to cut the pass back. */
+const OUTLET_CUT = 0.45;
+
+/** How many teammates are nearer the ball and able to play it. */
+function ballRank(ctx: Context): number {
+  const slack = ctx.memory.duty ? DUTY_HYSTERESIS : 0;
+  return outfieldMates(ctx).filter(
+    (m) => (m.knight?.stun ?? 0) <= 0 && dist(m, ctx.ball) < ctx.ballDistance - slack,
+  ).length;
+}
+
+const at = (p: Vec): Plan => hold(p.x, p.y);
+
 function outfield(ctx: Context): Plan {
-  const { skill, ball, me, self } = ctx;
-  const chaser = skill.positioning === 'swarm' || (skill.positioning === 'roles' && self.role === 'fwd');
-  if (chaser) return carry(ctx);
+  const { skill, self, memory, carrier, ours } = ctx;
+  if (skill.positioning === 'swarm' || carrier === self) return carry(ctx);
 
-  const closest = isClosest(ctx, outfieldMates(ctx));
-  const mateHasBall = outfieldMates(ctx).some((m) => dist(m, ball) < ctx.ballDistance - 30);
-
-  if (skill.positioning === 'roles') {
-    if (closest && ball.x < PITCH.centerX + 30) return carry(ctx);
-    const depth = self.role === 'def' ? 0.45 : 0.7;
-    return hold(
-      Math.min(PITCH.left + (ball.x - PITCH.left) * depth, PITCH.centerX - 50),
-      PITCH.centerY + (ball.y - PITCH.centerY) * 0.55,
-    );
+  const rank = ballRank(ctx);
+  const pressing = rank === 0 && carrier?.team !== self.team;
+  memory.duty = pressing ? 'press' : null;
+  if (!ours || pressing) memory.run = null;
+  if (pressing) return carry(ctx);
+  if (!carrier && !ours && rank === 1 && skill.contest > 1) {
+    memory.duty = 'cover';
+    return at(toward(ctx.lead, OWN_GOAL, SECOND_BALL_GAP));
   }
+  if (carrier && !ours && rank === 1) {
+    const second = cover(ctx);
+    if (second) {
+      memory.duty = 'cover';
+      return second;
+    }
+  }
+  if (skill.positioning === 'roles') return roleSpot(ctx);
+  if (ours) return self.role === 'def' ? supportAngle(ctx) : runIntoSpace(ctx);
+  return shape(ctx);
+}
 
-  // support: the full positional game.
+/** Opponents who could receive a pass from the carrier. */
+const attackers = (ctx: Context): Seen[] =>
+  ctx.opponents.filter((o) => o.knight !== ctx.carrier && o.knight?.role !== 'gk');
+
+/** Score bonus, in px, for the opponent already being tracked, so a bot doesn't flick between two. */
+const TRACK_STICKINESS = 40;
+
+/** The best-scoring opponent to track, favouring the current one. */
+function track(ctx: Context, among: readonly Seen[], score: (o: Seen) => number): Seen | undefined {
+  const keep = (o: Seen): number => score(o) + (o.knight?.id === ctx.memory.mark ? TRACK_STICKINESS : 0);
+  const best = among.reduce<Seen | undefined>((b, o) => (!b || keep(o) > keep(b) ? o : b), undefined);
+  ctx.memory.mark = best?.knight?.id ?? null;
+  return best;
+}
+
+/** The second defender: mark the most advanced attacker goal-side, or stand in the most dangerous lane. */
+function cover(ctx: Context): Plan | null {
+  const { skill, ball } = ctx;
+  if (skill.cover === 'none') return null;
+  if (skill.cover === 'mark') {
+    const runner = track(ctx, attackers(ctx), (o) => -dist(o, OWN_GOAL));
+    return runner ? at(toward(runner, OWN_GOAL, MARK_GAP)) : null;
+  }
+  const danger = (o: Seen): number =>
+    -dist(o, OWN_GOAL) + (laneBlocked(ball, o, ctx.mates, BALL.radius + 6) ? 0 : OPEN_LANE_DANGER);
+  const threat = track(ctx, attackers(ctx), danger);
+  return threat ? at(toward(ball, threat, dist(ball, threat) * LANE_CUT)) : null;
+}
+
+/** Squire positions: each role holds its own spot, shifted with the ball. */
+function roleSpot(ctx: Context): Plan {
+  const { ball, self, ours } = ctx;
+  const y = PITCH.centerY + (ball.y - PITCH.centerY) * 0.55;
+  if (self.role === 'fwd')
+    return hold(clamp(ball.x + (ours ? 170 : 110), PITCH.left + 200, PITCH.right - 90), y);
+  const depth = self.role === 'def' ? 0.45 : 0.7;
+  return hold(Math.min(PITCH.left + (ball.x - PITCH.left) * depth, PITCH.centerX - 50), y);
+}
+
+/** Out of possession, beyond the press and the cover: a compact block that moves with the ball and the runners. */
+function shape(ctx: Context): Plan {
+  const { ball, me, self } = ctx;
   switch (self.role) {
-    case 'def':
-      // Holds a line ~220px behind the ball, so it pushes up when the team attacks.
-      if (closest || ball.x < me.x - 10) return carry(ctx);
-      return hold(
-        clamp(ball.x - 220, PITCH.left + 120, PITCH.right - 320),
-        PITCH.centerY + (ball.y - PITCH.centerY) * 0.4,
-      );
+    case 'def': {
+      if (ball.x < me.x - 10) return carry(ctx);
+      const deepest = track(ctx, attackers(ctx), (o) => -o.x);
+      if (deepest && deepest.x < ball.x - IN_BEHIND) return at(toward(deepest, OWN_GOAL, MARK_GAP));
+      const line = Math.max(140, dist(OWN_GOAL, ball) - LINE_DEPTH);
+      return at(toward(OWN_GOAL, ball, line));
+    }
     case 'mid':
-      if (closest) return carry(ctx);
-      if (mateHasBall) return runIntoSpace(ctx);
-      ctx.memory.run = null;
-      return hold(
-        clamp(ball.x - 130, PITCH.left + 160, PITCH.centerX + 120),
-        PITCH.centerY + (ball.y - PITCH.centerY) * 0.6,
-      );
-    default:
-      if (mateHasBall) return runIntoSpace(ctx);
-      ctx.memory.run = null;
-      return carry(ctx);
+      return at(toward(ball, OWN_GOAL, SCREEN_GAP));
+    default: {
+      const outlet = track(ctx, attackers(ctx), (o) => o.x);
+      if (outlet && outlet.x > ball.x) return at(toward(ball, outlet, dist(ball, outlet) * OUTLET_CUT));
+      return at(toward(ball, OWN_GOAL, -SCREEN_GAP));
+    }
   }
 }
+
+/** How far behind the ball the defender offers the pass back, angled toward the middle. */
+const SUPPORT_DEPTH = 170;
+const SUPPORT_ANGLE = 0.35;
+/** The defender never pushes past this, so a counter can't get in behind him. */
+const SUPPORT_MAX_X = PITCH.right - 320;
+
+/** The defender in possession: behind the ball for the pass back, between it and the middle. */
+const supportAngle = ({ ball }: Context): Plan =>
+  hold(
+    clamp(ball.x - SUPPORT_DEPTH, PITCH.left + 120, SUPPORT_MAX_X),
+    PITCH.centerY + (ball.y - PITCH.centerY) * SUPPORT_ANGLE,
+  );
 
 /** How far ahead of the ball runs are considered, and across which lanes. */
 const RUN_DEPTHS = [110, 190, 270] as const;
 const RUN_LANES = [-190, -100, 0, 100, 190] as const;
 /** Keep the current run unless another spot is clearly better, so runners don't dither. */
 const RUN_STICKINESS = 25;
+/** A runner this close to his spot has arrived and, without the ball, makes a fresh movement. */
+const RUN_ARRIVED = 22;
+/** A fresh movement goes at least this far, so it reads as a new run rather than a shuffle. */
+const RUN_FRESH = 70;
+/** Seconds a new run is followed before it is reconsidered, unless its passing lane closes. */
+const RUN_COMMIT = 0.6;
 
 /**
- * A forward run while a teammate has the ball: head for open grass ahead of it that the carrier
- * can reach with a clear pass, so there is always an option beyond the defence.
+ * A forward run while a teammate has the ball: head for open grass ahead of it that the carrier can
+ * reach with a clear pass, so there is always an option beyond the defence. A runner who arrives and
+ * isn't found goes again, as a real one would, rather than standing on his spot.
  */
 function runIntoSpace(ctx: Context): Plan {
   const { ball, me, memory, opponents } = ctx;
+  const now = ctx.state.phaseTime;
+  const committed = memory.run !== null && now - memory.runSince < RUN_COMMIT && now >= memory.runSince;
+  if (committed && memory.run && !blocked(ctx, ball, memory.run)) return at(memory.run);
   const score = (p: Vec): number => {
     const space = Math.min(200, ...opponents.map((o) => dist(o, p)));
     const lane = blocked(ctx, ball, p) ? -150 : 0;
     return space + (p.x - ball.x) * 0.4 - dist(me, p) * 0.3 + lane;
   };
+  const arrived = memory.run !== null && dist(me, memory.run) < RUN_ARRIVED;
   let best: Vec | null = null;
   let bestScore = -Infinity;
   for (const depth of RUN_DEPTHS) {
@@ -247,6 +403,7 @@ function runIntoSpace(ctx: Context): Plan {
         x: clamp(ball.x + depth, PITCH.left + 120, PITCH.right - 70),
         y: clamp(PITCH.centerY + lane, PITCH.top + 40, PITCH.bottom - 40),
       };
+      if (arrived && dist(me, p) < RUN_FRESH) continue;
       const s = score(p);
       if (s > bestScore) {
         bestScore = s;
@@ -254,9 +411,11 @@ function runIntoSpace(ctx: Context): Plan {
       }
     }
   }
-  if (!memory.run || !best || bestScore > score(memory.run) + RUN_STICKINESS) memory.run = best;
-  const target = memory.run ?? { x: ball.x + RUN_DEPTHS[1], y: PITCH.centerY };
-  return hold(target.x, target.y);
+  if (!memory.run || arrived || !best || bestScore > score(memory.run) + RUN_STICKINESS) {
+    memory.run = best;
+    memory.runSince = now;
+  }
+  return at(memory.run ?? { x: ball.x + RUN_DEPTHS[1], y: PITCH.centerY });
 }
 
 const hold = (x: number, y: number): Plan => ({ x, y, kick: false, barge: false });
@@ -264,7 +423,7 @@ const hold = (x: number, y: number): Plan => ({ x, y, kick: false, barge: false 
 function keep(ctx: Context): Plan {
   const { ball, lead, self, skill } = ctx;
   if (skill.keeping === 'line') {
-    if (dist(ball, { x: PITCH.left, y: PITCH.centerY }) < 150 && ctx.ballDistance < 180) {
+    if (dist(ball, OWN_GOAL) < 150 && ctx.ballDistance < 180) {
       const p = carry(ctx);
       return { ...p, x: Math.min(p.x, PITCH.left + 220) };
     }
