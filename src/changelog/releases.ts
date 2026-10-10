@@ -21,6 +21,30 @@ export interface Release {
 
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.2',
+    date: '2026-10-10',
+    title: 'Torches lit',
+    summary: 'A new look for the whole realm, and bots that finally earn their keep off the ball.',
+    changes: [
+      {
+        kind: 'new',
+        text: 'The great hall: every screen restyled with dark stone, flickering torches, swaying house banners and gold heraldry.',
+      },
+      {
+        kind: 'new',
+        text: 'The castle gates swing shut on your house crest when a match kicks off. Press any key to skip.',
+      },
+      {
+        kind: 'improved',
+        text: 'Bots press the ball, cover passing lanes and keep moving off the ball instead of standing still. Better knights press smarter.',
+      },
+      {
+        kind: 'improved',
+        text: 'A clearer scoreboard and match screen, easier to read at a glance.',
+      },
+    ],
+  },
+  {
     version: '0.1',
     date: '2026-10-06',
     title: 'Hear the mob',
