@@ -5,14 +5,17 @@ import { sound } from '../../audio/sound';
 import { KNIGHT, MATCH, STEP } from '../../game/constants';
 import { createMatch, knightById, stepMatch } from '../../game/match';
 import { randomSeed } from '../../game/rng';
-import type { MatchEvent, MatchState } from '../../game/types';
+import type { MatchEvent, MatchState, TeamId } from '../../game/types';
 import { Keyboard } from '../../input/keyboard';
 import type { GoalRecord, MatchResult, MatchSession } from '../../modes/mode';
 import { Camera, VIEW } from '../../render/camera';
 import { Effects } from '../../render/effects';
 import { setupCanvas } from '../../render/paint';
 import { MatchRenderer } from '../../render/renderer';
+import type { House } from '../../setup/houses';
 import { button, h } from '../dom';
+import { blockColour, crest, icon } from '../heraldry';
+import { lozengeBurst, reducedMotion } from '../motion';
 
 /** Goals are replayed in slow motion for this long. */
 const SLOW_MOTION = { seconds: 0.6, scale: 0.25 } as const;
@@ -58,6 +61,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   const message = h('div', { class: 'msg', attrs: { 'aria-live': 'polite' } });
   const bargeRing = h('div', { class: 'ring' });
   const overlay = h('div', { class: 'overlay', attrs: { hidden: '' } });
+  const fx = h('div', { class: 'fx', attrs: { 'aria-hidden': 'true' } });
+  const teamBlock = (house: House, side: 'home' | 'away'): HTMLElement =>
+    h('div', { class: `team ${side}` }, crest(house), h('span', { text: house.name.toUpperCase() }));
+  const blocks = [teamBlock(homeHouse, 'home'), teamBlock(awayHouse, 'away')] as const;
   const mute = muteButton('Mute (M)', 'icon-btn mute-btn');
   mute.addEventListener('click', () => {
     mute.blur();
@@ -66,36 +73,36 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   root.append(
     h(
       'section',
-      { class: 'match' },
+      {
+        class: 'match',
+        attrs: { style: `--home: ${blockColour(homeHouse)}; --away: ${blockColour(awayHouse)}` },
+      },
       h(
         'div',
         { class: 'stage' },
         canvas,
+        fx,
         h(
           'div',
           { class: 'hud' },
-          h(
-            'div',
-            { class: 'board' },
-            h('div', { style: { background: homeHouse.colour }, text: homeHouse.name.toUpperCase() }),
-            score,
-            h('div', { style: { background: awayHouse.colour }, text: awayHouse.name.toUpperCase() }),
-            clock,
-          ),
+          h('div', { class: 'board' }, blocks[0], score, blocks[1], clock),
           message,
           h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' })),
           mute,
-          h('button', {
-            class: 'icon-btn pause-btn',
-            text: 'II',
-            attrs: { type: 'button', 'aria-label': 'Pause (Esc)', title: 'Pause (Esc)' },
-            on: {
-              click: (e) => {
-                (e.currentTarget as HTMLButtonElement).blur();
-                togglePause();
+          h(
+            'button',
+            {
+              class: 'icon-btn pause-btn',
+              attrs: { type: 'button', 'aria-label': 'Pause (Esc)', title: 'Pause (Esc)' },
+              on: {
+                click: (e) => {
+                  (e.currentTarget as HTMLButtonElement).blur();
+                  togglePause();
+                },
               },
             },
-          }),
+            icon('pause'),
+          ),
         ),
         overlay,
       ),
@@ -135,13 +142,33 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         : scorer?.human
           ? 'YOU SCORE!'
           : `${name.toUpperCase()} SCORES!`;
-      say(`${big('GOAL!')}<div>${escape(line)}</div>`, 2.2);
+      say(`${big('GOAL!')}<div class="msg-line">${escape(line)}</div>`, 2.2);
+      celebrate(event.team);
     } else if (event.type === 'golden-goal') {
-      say(`${big('GOLDEN GOAL')}<div>NEXT GOAL WINS</div>`, 1.8);
+      say(`${big('GOLDEN GOAL')}<div class="msg-line">NEXT GOAL WINS</div>`, 1.8);
     } else if (event.type === 'full-time') {
       showResults();
     }
   };
+
+  function celebrate(team: TeamId): void {
+    if (reducedMotion()) return;
+    blocks[team].animate(
+      [
+        { transform: 'scale(1)', filter: 'brightness(1)' },
+        { transform: 'scale(1.12)', filter: 'brightness(1.35)', offset: 0.3 },
+        { transform: 'scale(1)', filter: 'brightness(1)' },
+      ],
+      { duration: 900, iterations: 2, easing: 'cubic-bezier(.2,.9,.2,1)' },
+    );
+    lozengeBurst(fx, fx.clientWidth / 2, fx.clientHeight * 0.42, [
+      '#ffe39a',
+      '#f2c14e',
+      '#fff6d0',
+      homeHouse.colour,
+      awayHouse.colour,
+    ]);
+  }
 
   let paused = false;
   togglePause = (): void => {
@@ -149,11 +176,11 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     paused = !paused;
     if (paused) {
       showOverlay(
-        h('h2', { text: 'Paused' }),
+        h('h2', { class: 'ribbon', text: 'Paused' }),
         h(
           'div',
           { class: 'overlay-actions' },
-          button('Continue', togglePause, 'btn btn-go'),
+          button('Continue', togglePause, 'btn-primary'),
           button('Restart', () => {
             app.playMatch(session);
           }),
@@ -189,16 +216,27 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         }),
       ),
     );
+    const block = (house: House, side: 'home' | 'away'): HTMLElement =>
+      h('span', { class: `blk ${side}`, text: house.name });
     showOverlay(
-      h('h2', { text: verdict }),
-      h('p', { class: 'final', text: `${homeHouse.name} ${us} – ${them} ${awayHouse.name}` }),
-      goals.length ? scorers : h('p', { text: 'A goalless scrap.' }),
+      h('p', { class: 'ribbon', text: 'Full time' }),
+      h('h2', { class: 'verdict', text: verdict }),
+      h(
+        'p',
+        { class: 'final' },
+        block(homeHouse, 'home'),
+        ' ',
+        h('span', { class: 'final-score', text: `${us} – ${them}` }),
+        ' ',
+        block(awayHouse, 'away'),
+      ),
+      goals.length ? scorers : h('p', { class: 'goalless', text: 'A goalless scrap.' }),
       h(
         'div',
         { class: 'overlay-actions' },
         ...session
           .resultActions(result)
-          .map((action) => button(action.label, action.run, action.primary ? 'btn btn-go' : 'btn')),
+          .map((action) => button(action.label, action.run, action.primary ? 'btn-primary' : 'btn')),
       ),
     );
   }

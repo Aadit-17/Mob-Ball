@@ -1,5 +1,6 @@
 import { PITCH } from '../game/constants';
 import type { MatchEvent, MatchState } from '../game/types';
+import { PALETTE } from '../ui/palette';
 import { circle, INK, star, type Ctx } from './paint';
 
 interface Particle {
@@ -157,12 +158,13 @@ export class Effects {
       const s = 1 + Math.max(0, p.life - 0.6) * 3;
       c.scale(s, s);
       c.rotate(-0.08);
-      c.font = '28px "Lilita One", sans-serif';
+      c.font = '800 30px "Barlow Condensed", sans-serif';
       c.textAlign = 'center';
+      c.lineJoin = 'round';
       c.lineWidth = 6;
       c.strokeStyle = INK;
       c.strokeText(p.text, 0, 0);
-      c.fillStyle = '#ffd84a';
+      c.fillStyle = PALETTE.goldText;
       c.fillText(p.text, 0, 0);
       c.restore();
     }

@@ -31,3 +31,12 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 export function button(label: string, onClick: () => void, className = 'btn'): HTMLButtonElement {
   return h('button', { class: className, text: label, attrs: { type: 'button' }, on: { click: onClick } });
 }
+
+/** Parses trusted SVG markup the code itself authors, never user or release text. */
+export function svg(markup: string): SVGElement {
+  const holder = document.createElement('div');
+  holder.innerHTML = markup.trim();
+  const node = holder.firstElementChild;
+  if (!(node instanceof SVGElement)) throw new Error('Expected SVG markup');
+  return node;
+}

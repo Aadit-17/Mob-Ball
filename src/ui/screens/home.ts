@@ -4,26 +4,48 @@ import { sound } from '../../audio/sound';
 import { LATEST } from '../../changelog/releases';
 import { MODES } from '../../modes';
 import type { GameMode } from '../../modes/mode';
+import { HOUSES } from '../../setup/houses';
+import { buildStatRows } from '../build-stats';
 import { button, h } from '../dom';
+import { banner, blockColour, icon, torches, type IconName } from '../heraldry';
+import { throughTheGates } from '../motion';
 import { drawPortrait } from '../portrait';
+
+const MODE_ICONS: Readonly<Record<string, IconName>> = {
+  exhibition: 'ball',
+  cup: 'cup',
+  career: 'helm',
+  manager: 'scroll',
+};
+
+const BANNER_SWAY = [0, -1.3, -2.1, -0.6];
 
 function modeCard(mode: GameMode, app: AppContext): HTMLElement {
   return h(
     'article',
-    { class: `mode${mode.available ? '' : ' is-soon'}` },
+    { class: `mode sh${mode.available ? ' is-live' : ' is-soon'}` },
+    h('div', { class: 'mode-icon' }, icon(MODE_ICONS[mode.id] ?? 'ball')),
     h('h3', { text: mode.name }),
     h('p', { text: mode.blurb }),
-    mode.available
-      ? button(
-          'Play',
-          () => {
-            mode.start(app);
-          },
-          'btn btn-go',
-        )
-      : h('span', { class: 'soon', text: 'Coming soon' }),
+    h(
+      'div',
+      { class: 'mode-foot' },
+      mode.available
+        ? button(
+            'Play',
+            () => {
+              throughTheGates(() => {
+                mode.start(app);
+              });
+            },
+            'btn-primary',
+          )
+        : h('span', { class: 'soon' }, icon('lock'), 'Coming soon'),
+    ),
   );
 }
+
+const kbd = (key: string): HTMLElement => h('kbd', { text: key });
 
 export function mountHome(root: HTMLElement, app: AppContext): () => void {
   // Home is always the first screen, so this covers every screen after it.
@@ -32,21 +54,33 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
     class: 'home-portrait',
     attrs: { 'aria-label': `${app.look.name}, your knight` },
   });
+  const banners = HOUSES.map((house, i) => banner(house, BANNER_SWAY[i] ?? 0));
   root.append(
     h(
       'section',
       { class: 'home' },
-      h('h1', { class: 'logo', text: 'MOB BALL' }),
-      h('p', {
-        class: 'tagline',
-        text: 'Medieval football. Forge a knight, pick a house, and mob the ball.',
-      }),
+      torches(),
+      h(
+        'div',
+        { class: 'logo-row' },
+        h('div', { class: 'banners' }, ...banners.slice(0, 2)),
+        h(
+          'div',
+          { class: 'logo-block' },
+          h('h1', { class: 'logo metal', text: 'MOB BALL', attrs: { 'data-text': 'MOB BALL' } }),
+          h('p', {
+            class: 'tagline',
+            text: 'Medieval football. Forge a knight, raise your banner, and mob the ball.',
+          }),
+        ),
+        h('div', { class: 'banners' }, ...banners.slice(2)),
+      ),
       LATEST &&
         h(
           'a',
           { class: 'news', attrs: { href: './changelog.html' } },
           h('span', { class: 'news-version', text: `v${LATEST.version}` }),
-          h('span', { text: LATEST.title }),
+          h('span', { class: 'news-title', text: LATEST.title }),
           h('span', { class: 'news-cta', text: 'Read the chronicle →' }),
         ),
       h(
@@ -54,10 +88,15 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
         { class: 'home-grid' },
         h(
           'div',
-          { class: 'home-hero' },
-          portrait,
+          {
+            class: 'home-hero sh',
+            attrs: { style: `--house: ${blockColour(app.house)}` },
+          },
+          h('div', { class: 'plinth' }, h('div', { class: 'plinth-shield' }), portrait),
           h('p', { class: 'home-name', text: app.look.name }),
-          button('🛡️ Forge your knight', () => {
+          h('p', { class: 'home-house', text: `House ${app.house.name}` }),
+          h('div', { class: 'stats' }, ...buildStatRows(app.look)),
+          button('Forge your knight', () => {
             app.go('forge');
           }),
         ),
@@ -66,14 +105,20 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
       h(
         'div',
         { class: 'home-foot' },
-        h('p', {
-          class: 'hint',
-          text: 'WASD or arrows to run · Space to kick · Shift to barge. Best with a keyboard.',
-        }),
+        h(
+          'p',
+          { class: 'hint' },
+          kbd('WASD'),
+          ' or arrows to run · ',
+          kbd('Space'),
+          ' to kick · ',
+          kbd('Shift'),
+          ' to barge. Best with a keyboard.',
+        ),
         muteButton('Mute sound', 'icon-btn'),
       ),
     ),
   );
-  drawPortrait(portrait, app.look, app.house.colour, { width: 220, height: 240 });
+  drawPortrait(portrait, app.look, app.house.colour, { width: 172, height: 196 });
   return () => undefined;
 }

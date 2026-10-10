@@ -1,34 +1,4 @@
-:root {
-  --bg: #fff4e0;
-  --parchment: #fbf1dc;
-  --parchment-edge: #e9d7b3;
-  --ink: #2a1e3b;
-  --muted: #6d6380;
-  --red: #e8453c;
-  --orange: #f28c38;
-  --gold: #ffc93c;
-  --display: 'Lilita One', 'Arial Rounded MT Bold', system-ui, sans-serif;
-  --gothic: 'Pirata One', 'Lilita One', serif;
-  --gradient: linear-gradient(100deg, var(--red) 0%, var(--orange) 45%, var(--gold) 70%, var(--red) 100%);
-  color-scheme: light;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  margin: 0;
-  color: var(--ink);
-  font:
-    17px/1.6 Nunito,
-    system-ui,
-    sans-serif;
-  background:
-    repeating-linear-gradient(45deg, rgba(232, 69, 60, 0.035) 0 14px, transparent 14px 28px),
-    repeating-linear-gradient(-45deg, rgba(42, 30, 59, 0.03) 0 14px, transparent 14px 28px), var(--bg);
-}
+@import '../ui/theme.css';
 
 main {
   max-width: 860px;
@@ -36,90 +6,48 @@ main {
   padding: 28px 16px 72px;
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-/* Gradient lettering with an ink drop shadow, the game's sticker look. */
-.gradient {
-  font-family: var(--display);
-  font-weight: 400;
-  line-height: 1.1;
-  background: var(--gradient);
-  background-size: 220% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  filter: drop-shadow(3px 3px 0 var(--ink));
-  animation: shimmer 7s ease-in-out infinite;
-}
-
-@keyframes shimmer {
-  0%,
-  100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-}
-
 /* header */
 .herald {
+  position: relative;
   text-align: center;
 }
 
-.back {
-  display: inline-block;
-  font-weight: 800;
-  color: var(--ink);
-  text-decoration: none;
-  border: 2.5px solid var(--ink);
-  border-radius: 999px;
-  padding: 6px 16px;
-  background: #fff;
-  box-shadow: 2px 2px 0 var(--ink);
-}
-
-.back:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 3px 3px 0 var(--ink);
-}
-
-:focus-visible {
-  outline: 3px solid var(--red);
-  outline-offset: 3px;
+.herald {
+  --torch-top: 190px;
 }
 
 .kicker {
-  font-family: var(--gothic);
-  font-size: 28px;
-  color: #8e1c24;
-  margin: 26px 0 0;
-  letter-spacing: 1px;
+  margin: 28px 0 4px;
+  color: var(--gold-text);
+  font: 700 18px var(--font-head);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
 }
 
 .title {
-  font-size: clamp(56px, 12vw, 104px);
   margin: 0;
-  filter: drop-shadow(5px 5px 0 var(--ink));
+  font: 800 clamp(40px, 8vw, 72px) / 1.1 var(--font-head);
+  letter-spacing: 1px;
+  white-space: nowrap;
 }
 
 .lede {
-  font-size: 19px;
-  color: var(--muted);
-  margin: 10px 0 18px;
+  margin: 12px 0 18px;
+  color: var(--tab-text);
+  font-size: 18px;
 }
 
 .skyline {
+  display: block;
   width: min(100%, 560px);
   height: auto;
-  display: block;
   margin: 0 auto;
 }
 
@@ -145,20 +73,22 @@ main {
 
 /* legend */
 .legend {
-  list-style: none;
   display: flex;
-  justify-content: center;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 10px 22px;
-  padding: 0;
   margin: 26px 0 8px;
-  font-weight: 800;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  font-weight: 700;
+  font-size: 16px;
 }
 
 .legend li {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .shield {
@@ -167,125 +97,119 @@ main {
   flex: none;
 }
 
-/* releases: each one a scroll with rolled ends and a wax seal */
+/* releases: each one a tapestry hung from a gold rod, sealed in wax */
 .releases {
-  list-style: none;
-  padding: 0;
   margin: 28px 0 0;
+  padding: 0;
+  list-style: none;
 }
 
 .scroll {
-  position: relative;
-  margin: 34px 10px 0;
-  padding: 34px 34px 30px 118px;
-  background: linear-gradient(
-    90deg,
-    var(--parchment-edge) 0,
-    var(--parchment) 4%,
-    var(--parchment) 96%,
-    var(--parchment-edge) 100%
-  );
-  border: 3px solid var(--ink);
-  border-radius: 6px;
-  box-shadow: 6px 6px 0 var(--ink);
+  --clip: var(--clip-pennant);
+  --rim: linear-gradient(180deg, var(--gold-rim), var(--iron));
+  --fill:
+    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(242, 193, 78, 0.12), transparent 70%),
+    linear-gradient(180deg, var(--panel), var(--panel-lo));
+  margin: 40px 6px 0;
+  padding: 36px 36px 54px 124px;
 }
 
-.scroll::before,
-.scroll::after {
+.scroll .rod {
+  position: absolute;
+  top: -6px;
+  left: -10px;
+  right: -10px;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(var(--gold-hi), #a86f1f);
+  box-shadow: 0 3px 0 var(--bronze-shadow);
+}
+
+.scroll .rod::before,
+.scroll .rod::after {
   content: '';
   position: absolute;
-  left: -12px;
-  right: -12px;
-  height: 22px;
-  border: 3px solid var(--ink);
-  border-radius: 999px;
-  background: linear-gradient(180deg, #f6e6c4, #d8c196);
+  top: -3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff2b8, #c98d2a 60%, #6b4510);
 }
 
-.scroll::before {
-  top: -14px;
+.scroll .rod::before {
+  left: -9px;
 }
 
-.scroll::after {
-  bottom: -14px;
+.scroll .rod::after {
+  right: -9px;
 }
 
 .seal {
   position: absolute;
-  top: 26px;
-  left: 18px;
+  top: 30px;
+  left: 22px;
   width: 84px;
   height: 84px;
   transform: rotate(-12deg);
-  filter: drop-shadow(2px 3px 0 rgba(42, 30, 59, 0.35));
+  filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.5));
 }
 
 .seal text {
-  font: 400 30px var(--gothic);
+  font: 700 25px var(--font-head);
   fill: #ffe8c2;
 }
 
-.ribbon {
+.scroll .ribbon {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  margin: 0 0 8px;
-  padding: 3px 16px;
-  font-family: var(--gothic);
-  font-size: 20px;
-  color: #fff8e8;
-  background: #8e1c24;
-  border: 2.5px solid var(--ink);
-  clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 50%, 100% 100%, 0 100%, 10px 50%);
-  padding-left: 22px;
-  padding-right: 24px;
+  margin-bottom: 10px;
+  font-size: 15px;
+  letter-spacing: 1px;
 }
 
 .latest {
-  font:
-    800 12px Nunito,
-    sans-serif;
-  text-transform: uppercase;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: #8e1c24;
+  color: #fff;
+  font: 800 14px/1.5 var(--font-hud);
   letter-spacing: 1px;
-  background: var(--gold);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 1px 8px;
 }
 
 .scroll h2 {
-  font-size: clamp(32px, 6vw, 46px);
   margin: 0 0 8px;
+  color: #fff3d6;
+  font: 700 clamp(28px, 5vw, 40px) / 1.15 var(--font-head);
 }
 
 .summary {
-  font-size: 18px;
   margin: 0 0 4px;
+  font-size: 18px;
 }
 
 .tally {
   margin: 0 0 16px;
-  color: var(--muted);
-  font-weight: 800;
-  font-size: 14px;
+  color: var(--gold-rim);
+  font: 700 15px var(--font-hud);
+  letter-spacing: 1px;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
 }
 
 .changes {
-  list-style: none;
-  padding: 0;
-  margin: 0;
   display: grid;
   gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .change {
   display: flex;
-  gap: 12px;
   align-items: flex-start;
+  gap: 12px;
   padding-top: 12px;
-  border-top: 2px dashed rgba(42, 30, 59, 0.18);
+  border-top: 1px solid rgba(156, 132, 96, 0.35);
 }
 
 .change .shield {
@@ -301,6 +225,7 @@ main {
 .swords {
   width: 64px;
   height: 64px;
+  filter: drop-shadow(0 4px 4px rgba(0, 0, 0, 0.45));
 }
 
 /* horizon */
@@ -310,74 +235,81 @@ main {
 }
 
 .horizon h2 {
-  font-size: 40px;
-  margin: 0 0 16px;
+  margin: 0 0 18px;
+  color: #fff3d6;
+  font: 700 34px var(--font-head);
 }
 
 .horizon ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   text-align: left;
 }
 
 .horizon li {
-  border: 3px dashed var(--ink);
-  border-radius: 16px;
-  padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.5);
+  --clip: var(--clip-pennant);
+  --rim: var(--iron);
+  --fill: linear-gradient(180deg, #322e38, #26232b);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px 38px;
 }
 
 .horizon b {
-  display: block;
-  font: 400 22px var(--display);
+  color: #fff3d6;
+  font: 700 20px var(--font-head);
 }
 
 .horizon span {
-  display: block;
-  color: var(--muted);
+  flex: 1;
+  color: var(--text-2);
   font-size: 15px;
 }
 
-.horizon em {
-  display: block;
-  margin-top: 6px;
+.horizon .soon {
+  align-self: flex-start;
+  margin-top: 8px;
   font-style: normal;
-  font-weight: 800;
-  font-size: 13px;
-  color: #8e1c24;
 }
 
 .colophon {
   margin-top: 48px;
+  color: var(--text-2);
+  font: 700 16px var(--font-head);
+  letter-spacing: 2px;
   text-align: center;
-  font-family: var(--gothic);
-  font-size: 20px;
-  color: var(--muted);
+  text-transform: uppercase;
+}
+
+@media (max-width: 1180px) {
+  .herald .torches {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .title-row .banners {
+    display: none;
+  }
 }
 
 @media (max-width: 620px) {
   .scroll {
-    padding: 100px 20px 26px;
+    padding: 108px 20px 50px;
   }
 
   .seal {
     left: 50%;
-    top: 14px;
+    top: 18px;
     margin-left: -42px;
   }
 
   .scroll-head {
     text-align: center;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .gradient,
-  .pennant {
-    animation: none;
   }
 }

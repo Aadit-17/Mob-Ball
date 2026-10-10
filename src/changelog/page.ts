@@ -1,4 +1,6 @@
-import { h } from '../ui/dom';
+import { HOUSES } from '../setup/houses';
+import { h, svg } from '../ui/dom';
+import { banner, icon, torches } from '../ui/heraldry';
 import { castleSkyline, crossedSwords, kindShield, waxSeal } from './art';
 import { RELEASES, type ChangeKind, type Release } from './releases';
 import './changelog.css';
@@ -10,14 +12,7 @@ const HORIZON = [
   { name: 'Manager', text: 'Run a house: draft knights, set line-ups, win the league.' },
 ];
 
-/** Parses markup the page itself authors (the SVG art), never user or release text. */
-function art(markup: string): Element {
-  const holder = document.createElement('div');
-  holder.innerHTML = markup.trim();
-  const node = holder.firstElementChild;
-  if (!node) throw new Error('Empty artwork');
-  return node;
-}
+const BANNER_SWAY = [0, -1.3, -2.1, -0.6];
 
 const formatDate = (iso: string): string =>
   new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', {
@@ -38,8 +33,12 @@ function tally(release: Release): string {
 function releaseScroll(release: Release, latest: boolean): HTMLElement {
   return h(
     'article',
-    { class: 'scroll', attrs: { id: `v${release.version}`, 'aria-labelledby': `v${release.version}-title` } },
-    art(waxSeal(release.version)),
+    {
+      class: 'scroll sh',
+      attrs: { id: `v${release.version}`, 'aria-labelledby': `v${release.version}-title` },
+    },
+    h('div', { class: 'rod', attrs: { 'aria-hidden': 'true' } }),
+    svg(waxSeal(release.version)),
     h(
       'div',
       { class: 'scroll-head' },
@@ -49,7 +48,7 @@ function releaseScroll(release: Release, latest: boolean): HTMLElement {
         h('time', { text: formatDate(release.date), attrs: { datetime: release.date } }),
         latest && h('span', { class: 'latest', text: 'Latest' }),
       ),
-      h('h2', { class: 'gradient', text: release.title, attrs: { id: `v${release.version}-title` } }),
+      h('h2', { text: release.title, attrs: { id: `v${release.version}-title` } }),
       h('p', { class: 'summary', text: release.summary }),
       h('p', { class: 'tally', text: tally(release) }),
     ),
@@ -60,7 +59,7 @@ function releaseScroll(release: Release, latest: boolean): HTMLElement {
         h(
           'li',
           { class: `change is-${change.kind}` },
-          art(kindShield(change.kind)),
+          svg(kindShield(change.kind)),
           h('span', { class: 'visually-hidden', text: `${KIND_LABELS[change.kind]}: ` }),
           h('span', { text: change.text }),
         ),
@@ -71,41 +70,49 @@ function releaseScroll(release: Release, latest: boolean): HTMLElement {
 
 function render(root: HTMLElement): void {
   const scrolls = RELEASES.flatMap((release, i) => [
-    ...(i > 0 ? [h('li', { class: 'divider', attrs: { 'aria-hidden': 'true' } }, art(crossedSwords()))] : []),
+    ...(i > 0 ? [h('li', { class: 'divider', attrs: { 'aria-hidden': 'true' } }, svg(crossedSwords()))] : []),
     h('li', {}, releaseScroll(release, i === 0)),
   ]);
+  const banners = HOUSES.map((house, i) => banner(house, BANNER_SWAY[i] ?? 0));
   root.append(
     h(
       'header',
       { class: 'herald' },
-      h('a', { class: 'back', text: '← Back to the game', attrs: { href: './' } }),
+      torches(),
+      h('a', { class: 'btn back', text: '← Back to the game', attrs: { href: './' } }),
       h('p', { class: 'kicker', text: 'Hear ye, hear ye!' }),
-      h('h1', { class: 'gradient title', text: 'The Chronicle' }),
+      h(
+        'div',
+        { class: 'title-row' },
+        h('div', { class: 'banners' }, ...banners.slice(0, 2)),
+        h('h1', { class: 'title metal', text: 'The Chronicle', attrs: { 'data-text': 'The Chronicle' } }),
+        h('div', { class: 'banners' }, ...banners.slice(2)),
+      ),
       h('p', { class: 'lede', text: 'Every update to MOB BALL, proclaimed from the castle walls.' }),
-      art(castleSkyline()),
+      svg(castleSkyline()),
     ),
     h(
       'ul',
       { class: 'legend', attrs: { 'aria-label': 'Kinds of change' } },
       ...(Object.keys(KIND_LABELS) as ChangeKind[]).map((kind) =>
-        h('li', {}, art(kindShield(kind)), KIND_LABELS[kind]),
+        h('li', {}, svg(kindShield(kind)), KIND_LABELS[kind]),
       ),
     ),
     h('ol', { class: 'releases', attrs: { reversed: '' } }, ...scrolls),
     h(
       'section',
       { class: 'horizon', attrs: { 'aria-labelledby': 'horizon-title' } },
-      h('h2', { class: 'gradient', text: 'On the horizon', attrs: { id: 'horizon-title' } }),
+      h('h2', { text: 'On the horizon', attrs: { id: 'horizon-title' } }),
       h(
         'ul',
         {},
         ...HORIZON.map((mode) =>
           h(
             'li',
-            {},
+            { class: 'sh' },
             h('b', { text: mode.name }),
             h('span', { text: mode.text }),
-            h('em', { text: 'Coming soon' }),
+            h('em', { class: 'soon' }, icon('lock'), 'Coming soon'),
           ),
         ),
       ),

@@ -1,6 +1,7 @@
 import { PITCH } from '../game/constants';
 import type { Knight, MatchState } from '../game/types';
 import { drawKnight } from '../knight/draw';
+import { PALETTE } from '../ui/palette';
 import type { Camera } from './camera';
 import { VIEW } from './camera';
 import type { Effects } from './effects';
@@ -10,6 +11,7 @@ import { Crowd, drawBall, drawPost, renderPitch } from './pitch';
 /** Sprites are drawn at this fraction of a knight's physics size, which reads better on screen. */
 const SPRITE_SCALE = 0.8 / 18;
 const MINIMAP_WIDTH = 170;
+const GOLD = PALETTE.goldText;
 
 export interface Scene {
   readonly state: MatchState;
@@ -120,15 +122,16 @@ export class MatchRenderer {
 
   private drawLabels(scene: Scene): void {
     const { c } = this;
-    c.font = '800 10px Nunito, sans-serif';
+    c.font = '700 12px "Barlow Condensed", sans-serif';
     c.textAlign = 'center';
+    c.lineJoin = 'round';
     for (const k of scene.state.knights) {
       const isHuman = k.id === scene.humanId;
       const text = isHuman ? 'YOU' : k.look.name;
       c.lineWidth = 3;
       c.strokeStyle = INK;
       c.strokeText(text, k.x, k.y + k.radius + 12);
-      c.fillStyle = isHuman ? '#ffd84a' : '#fff';
+      c.fillStyle = isHuman ? GOLD : '#fff';
       c.fillText(text, k.x, k.y + k.radius + 12);
       if (isHuman && scene.state.phase !== 'ended') {
         const y = k.y - k.radius * 4.1 + Math.sin(scene.time * 5) * 3;
@@ -137,7 +140,7 @@ export class MatchRenderer {
         c.lineTo(k.x + 8, y);
         c.lineTo(k.x, y + 11);
         c.closePath();
-        fillInk(c, '#ffd84a', 2.5);
+        fillInk(c, GOLD, 2.5);
       }
     }
   }
@@ -154,38 +157,47 @@ export class MatchRenderer {
     const Y = (y: number): number => oy + (y - top) * scale;
 
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    c.globalAlpha = 0.88;
-    roundRect(c, X(left) - 2, oy - 2, (right - left) * scale + 4, height + 4, 5);
-    fillInk(c, '#5fbf4a', 2.5);
-    c.fillStyle = '#4a3f5e';
-    c.fillRect(X(left - goalDepth), Y(goalTop), goalDepth * scale, (goalBottom - goalTop) * scale);
-    c.fillRect(X(right), Y(goalTop), goalDepth * scale, (goalBottom - goalTop) * scale);
-    c.strokeStyle = 'rgba(255,255,255,.8)';
-    c.lineWidth = 1;
+    const w = (right - left) * scale;
+    roundRect(c, X(left) - 6, oy - 6, w + 12, height + 12, 6);
+    c.fillStyle = 'rgba(20,18,24,.82)';
+    c.fill();
+    c.lineWidth = 2;
+    c.strokeStyle = PALETTE.goldRim;
+    c.stroke();
+    c.strokeStyle = 'rgba(255,255,255,.7)';
+    c.lineWidth = 1.5;
+    c.strokeRect(X(left), oy, w, height);
+    c.strokeRect(X(left - goalDepth), Y(goalTop), goalDepth * scale, (goalBottom - goalTop) * scale);
+    c.strokeRect(X(right), Y(goalTop), goalDepth * scale, (goalBottom - goalTop) * scale);
     c.beginPath();
     c.moveTo(X(PITCH.centerX), oy);
     c.lineTo(X(PITCH.centerX), oy + height);
+    c.stroke();
+    circle(c, X(PITCH.centerX), Y(PITCH.centerY), height * 0.16);
     c.stroke();
     const vx0 = Math.max(camera.left, left);
     const vy0 = Math.max(camera.top, top);
     const vx1 = Math.min(camera.left + VIEW.width, right);
     const vy1 = Math.min(camera.top + VIEW.height, bottom);
-    c.strokeStyle = 'rgba(255,255,255,.9)';
+    c.strokeStyle = 'rgba(255,214,120,.55)';
     c.lineWidth = 1.5;
     c.strokeRect(X(vx0), Y(vy0), (vx1 - vx0) * scale, (vy1 - vy0) * scale);
     for (const k of state.knights) {
       const isHuman = k.id === scene.humanId;
       circle(c, X(k.x), Y(k.y), isHuman ? 4.5 : 3.5);
-      fillInk(c, this.teamColour(k, scene), isHuman ? 2 : 1.2);
+      c.fillStyle = this.teamColour(k, scene);
+      c.fill();
+      c.lineWidth = 1.5;
+      c.strokeStyle = '#fff';
+      c.stroke();
       if (isHuman) {
-        circle(c, X(k.x), Y(k.y), 7);
-        c.strokeStyle = '#ffd84a';
+        circle(c, X(k.x), Y(k.y), 7.5);
+        c.strokeStyle = GOLD;
         c.lineWidth = 1.5;
         c.stroke();
       }
     }
     circle(c, X(state.ball.x), Y(state.ball.y), 2.6);
     fillInk(c, '#fff', 1.2);
-    c.globalAlpha = 1;
   }
 }

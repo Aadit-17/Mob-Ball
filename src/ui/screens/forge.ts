@@ -22,6 +22,7 @@ import {
   type Look,
 } from '../../knight/look';
 import { setupCanvas } from '../../render/paint';
+import { buildStatRows } from '../build-stats';
 import { button, h } from '../dom';
 
 const PREVIEW = 340;
@@ -77,8 +78,8 @@ export function mountForge(root: HTMLElement, app: AppContext): () => void {
     },
   });
   const stats = h('div', { class: 'stats' });
-  const tabs = h('div', { class: 'tabs', attrs: { role: 'tablist' } });
-  const panel = h('div', { class: 'forge-options', attrs: { role: 'tabpanel' } });
+  const tabs = h('div', { class: 'tabs', attrs: { role: 'tablist', 'aria-label': 'Knight parts' } });
+  const panel = h('div', { class: 'forge-options panel', attrs: { role: 'tabpanel' } });
   const codeInput = h('input', {
     class: 'code-input',
     attrs: { placeholder: 'Paste a knight code (MB1-…)', 'aria-label': 'Knight code' },
@@ -102,18 +103,7 @@ export function mountForge(root: HTMLElement, app: AppContext): () => void {
       ),
     );
     panel.replaceChildren(...SLOTS.filter((s) => s.tab === tab).map(slotRow));
-    const build = option(BUILDS, look.build);
-    stats.replaceChildren(
-      h('div', {}, h('span', { text: 'Build' }), h('b', { text: build.name })),
-      ...['Speed', 'Power', 'Weight'].map((label, i) =>
-        h(
-          'div',
-          {},
-          h('span', { text: label }),
-          h('div', { class: 'statbar' }, h('i', { style: { width: `${(build.rating[i] ?? 0) * 20}%` } })),
-        ),
-      ),
-    );
+    stats.replaceChildren(...buildStatRows(look));
   }
 
   function slotRow(slot: SlotDef): HTMLElement {
@@ -219,7 +209,7 @@ export function mountForge(root: HTMLElement, app: AppContext): () => void {
       h(
         'div',
         { class: 'forge-grid' },
-        h('div', { class: 'forge-preview' }, canvas, nameInput, stats),
+        h('div', { class: 'forge-preview sh' }, canvas, nameInput, stats),
         h(
           'div',
           {},
@@ -228,14 +218,14 @@ export function mountForge(root: HTMLElement, app: AppContext): () => void {
           h(
             'div',
             { class: 'forge-actions' },
-            button('🎲 Randomise all', randomiseAll),
-            button('🎲 Randomise this tab', randomiseTab),
+            button('Randomise all', randomiseAll),
+            button('Randomise this tab', randomiseTab),
             button(
-              '⚔️ Take the field',
+              'Take the field',
               () => {
                 app.go('setup');
               },
-              'btn btn-go',
+              'btn-primary',
             ),
           ),
           h(
@@ -275,7 +265,7 @@ export function mountForge(root: HTMLElement, app: AppContext): () => void {
     const scale =
       Math.min(3.3, (PREVIEW * 0.86) / spriteHeight(look)) *
       Math.sqrt(option(BUILDS, look.build).radius / 18);
-    ctx.fillStyle = 'rgba(42,30,59,.18)';
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
     ctx.beginPath();
     ctx.ellipse(PREVIEW / 2, PREVIEW * 0.93, PREVIEW * 0.2, PREVIEW * 0.045, 0, 0, Math.PI * 2);
     ctx.fill();

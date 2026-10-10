@@ -126,11 +126,11 @@ export const SLOTS: readonly SlotDef[] = [
 ];
 
 export const FORGE_TABS: readonly { readonly id: ForgeTab; readonly label: string }[] = [
-  { id: 'helmet', label: '🪖 Helmet' },
-  { id: 'face', label: '🙂 Face' },
-  { id: 'armour', label: '🛡️ Armour' },
-  { id: 'limbs', label: '🦵 Arms & legs' },
-  { id: 'extras', label: '🎒 Extras' },
+  { id: 'helmet', label: 'Helmet' },
+  { id: 'face', label: 'Face' },
+  { id: 'armour', label: 'Armour' },
+  { id: 'limbs', label: 'Arms & legs' },
+  { id: 'extras', label: 'Extras' },
 ];
 
 export const KNIGHT_NAMES = [

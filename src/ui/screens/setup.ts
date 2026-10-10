@@ -7,6 +7,8 @@ import { option } from '../../knight/catalog';
 import { exhibitionSession } from '../../modes/exhibition';
 import { HOUSES, type House } from '../../setup/houses';
 import { button, h } from '../dom';
+import { blockColour, crest } from '../heraldry';
+import { throughTheGates } from '../motion';
 import { drawPortrait } from '../portrait';
 
 export const ROLE_NAMES: Readonly<Record<Role, string>> = {
@@ -29,17 +31,20 @@ function choice<T extends string | number>(
     { class: 'choice', attrs: { role: 'group', 'aria-label': label } },
     h('b', { text: label }),
     ...options.map((o) =>
-      h('button', {
-        class: 'btn',
-        text: o.label,
-        attrs: { type: 'button', 'aria-pressed': String(o.value === current) },
-        style: o.colour ? { boxShadow: `inset 0 -5px 0 ${o.colour}, 2px 2px 0 var(--ink)` } : {},
-        on: {
-          click: () => {
-            onPick(o.value);
+      h(
+        'button',
+        {
+          class: 'chip',
+          attrs: { type: 'button', 'aria-pressed': String(o.value === current) },
+          on: {
+            click: () => {
+              onPick(o.value);
+            },
           },
         },
-      }),
+        o.colour && h('i', { class: 'chip-shield', attrs: { style: `--c: ${o.colour}` } }),
+        o.label,
+      ),
     ),
   );
 }
@@ -67,8 +72,7 @@ function tierPicker(spec: KnightSpec, onChange: (tier: number) => void): HTMLEle
     h(
       'small',
       { class: 'tier', attrs: { title: 'Bot skill level' } },
-      stars(spec.tier),
-      h('br'),
+      h('span', { class: 'stars', text: stars(spec.tier), attrs: { 'aria-hidden': 'true' } }),
       skillFor(spec.tier).name,
     ),
     step(1, 'Raise'),
@@ -98,16 +102,21 @@ export function mountSetup(root: HTMLElement, app: AppContext): () => void {
     const lineup = (label: string, house: House, team: 0 | 1, specs: readonly KnightSpec[]): HTMLElement =>
       h(
         'div',
-        { class: 'lineup' },
+        { class: 'lineup panel' },
         h(
           'h3',
           {},
-          h('i', { class: 'dot', style: { background: house.colour } }),
-          `${house.name} · ${label}`,
+          h(
+            'span',
+            { class: 'house-block', style: { background: blockColour(house) } },
+            crest(house),
+            house.name,
+          ),
+          label,
         ),
         h(
           'div',
-          { class: 'cards', style: { gridTemplateColumns: `repeat(${specs.length}, 1fr)` } },
+          { class: 'cards', attrs: { style: `--n: ${specs.length}` } },
           ...specs.map((s, i) =>
             knightCard(s, house, (tier) => {
               app.setKnightTier(team, i, tier);
@@ -119,7 +128,7 @@ export function mountSetup(root: HTMLElement, app: AppContext): () => void {
     body.replaceChildren(
       h(
         'div',
-        { class: 'choices' },
+        { class: 'choices panel' },
         choice(
           'Your house',
           HOUSES.map((house) => ({ value: house.id, label: house.name, colour: house.colour })),
@@ -168,8 +177,8 @@ export function mountSetup(root: HTMLElement, app: AppContext): () => void {
       h(
         'div',
         { class: 'lineups' },
-        lineup('your house', app.house, 0, app.squads.home),
-        lineup('rivals', app.rival, 1, app.squads.away),
+        lineup('Your house', app.house, 0, app.squads.home),
+        lineup('Rivals', app.rival, 1, app.squads.away),
       ),
     );
   };
@@ -190,19 +199,21 @@ export function mountSetup(root: HTMLElement, app: AppContext): () => void {
       h(
         'div',
         { class: 'setup-actions' },
-        button('🎲 New random squads', () => {
+        button('New random squads', () => {
           app.rerollSquads();
           render();
         }),
-        button('🛡️ Edit my knight', () => {
+        button('Edit my knight', () => {
           app.go('forge');
         }),
         button(
-          '⚔️ Kick off',
+          'Kick off',
           () => {
-            app.playMatch(exhibitionSession(app));
+            throughTheGates(() => {
+              app.playMatch(exhibitionSession(app));
+            });
           },
-          'btn btn-go',
+          'btn-primary',
         ),
       ),
     ),
