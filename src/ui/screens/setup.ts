@@ -6,6 +6,7 @@ import type { Role } from '../../game/types';
 import { option } from '../../knight/catalog';
 import { exhibitionSession } from '../../modes/exhibition';
 import { HOUSES, type House } from '../../setup/houses';
+import { choice } from '../choice';
 import { button, h } from '../dom';
 import { blockColour, crest } from '../heraldry';
 import { throughTheGates } from '../motion';
@@ -18,36 +19,7 @@ export const ROLE_NAMES: Readonly<Record<Role, string>> = {
   fwd: 'Forward',
 };
 
-const stars = (tier: number): string => '★'.repeat(tier + 1) + '☆'.repeat(TIERS.length - tier - 1);
-
-function choice<T extends string | number>(
-  label: string,
-  options: readonly { value: T; label: string; colour?: string }[],
-  current: T,
-  onPick: (value: T) => void,
-): HTMLElement {
-  return h(
-    'div',
-    { class: 'choice', attrs: { role: 'group', 'aria-label': label } },
-    h('b', { text: label }),
-    ...options.map((o) =>
-      h(
-        'button',
-        {
-          class: 'chip',
-          attrs: { type: 'button', 'aria-pressed': String(o.value === current) },
-          on: {
-            click: () => {
-              onPick(o.value);
-            },
-          },
-        },
-        o.colour && h('i', { class: 'chip-shield', attrs: { style: `--c: ${o.colour}` } }),
-        o.label,
-      ),
-    ),
-  );
-}
+export const stars = (tier: number): string => '★'.repeat(tier + 1) + '☆'.repeat(TIERS.length - tier - 1);
 
 /** ◀ ★★★☆☆ Knight ▶ — steps one bot's skill tier. */
 function tierPicker(spec: KnightSpec, onChange: (tier: number) => void): HTMLElement {

@@ -1,9 +1,13 @@
-import { TOP_TIER } from './ai/skills';
+import { DIFFICULTIES, TOP_TIER } from './ai/skills';
 import { normalizeLook, type Look } from './knight/look';
+import { normalizeCup, type CupState } from './modes/cup/bracket';
+import { REALM_HOUSES } from './setup/houses';
 
 const LOOK_KEY = 'mobball.look.v2';
 const SETTINGS_KEY = 'mobball.settings.v1';
 const MUTED_KEY = 'mobball.muted.v1';
+const CUP_KEY = 'mobball.cup.v1';
+const HONOURS_KEY = 'mobball.honours.v1';
 
 export interface Preferences {
   houseId: string;
@@ -65,4 +69,29 @@ export const savePreferences = (prefs: Preferences): void => {
 export const loadMuted = (): boolean => read(MUTED_KEY) === true;
 export const saveMuted = (muted: boolean): void => {
   write(MUTED_KEY, muted);
+};
+
+/** The Realm Cup run in progress or just finished, if any. */
+export const loadCup = (): CupState | null =>
+  normalizeCup(
+    read(CUP_KEY),
+    REALM_HOUSES.map((h) => h.id),
+    DIFFICULTIES.map((d) => d.id),
+  );
+export const saveCup = (cup: CupState | null): void => {
+  write(CUP_KEY, cup);
+};
+
+export interface Honours {
+  cupWins: number;
+}
+
+export function loadHonours(): Honours {
+  const raw = read(HONOURS_KEY);
+  const wins = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).cupWins : 0;
+  return { cupWins: typeof wins === 'number' && Number.isInteger(wins) && wins > 0 ? wins : 0 };
+}
+
+export const saveHonours = (honours: Honours): void => {
+  write(HONOURS_KEY, honours);
 };

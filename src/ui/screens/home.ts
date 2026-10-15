@@ -21,18 +21,20 @@ const MODE_ICONS: Readonly<Record<string, IconName>> = {
 const BANNER_SWAY = [0, -1.3, -2.1, -0.6];
 
 function modeCard(mode: GameMode, app: AppContext): HTMLElement {
+  const progress = mode.progress?.(app) ?? null;
   return h(
     'article',
     { class: `mode sh${mode.available ? ' is-live' : ' is-soon'}` },
     h('div', { class: 'mode-icon' }, icon(MODE_ICONS[mode.id] ?? 'ball')),
     h('h3', { text: mode.name }),
     h('p', { text: mode.blurb }),
+    progress && h('p', { class: 'mode-progress', text: progress.note }),
     h(
       'div',
       { class: 'mode-foot' },
       mode.available
         ? button(
-            'Play',
+            progress?.action ?? 'Play',
             () => {
               throughTheGates(() => {
                 mode.start(app);
@@ -55,6 +57,7 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
     attrs: { 'aria-label': `${app.look.name}, your knight` },
   });
   const banners = HOUSES.map((house, i) => banner(house, BANNER_SWAY[i] ?? 0));
+  const wins = app.honours.cupWins;
   root.append(
     h(
       'section',
@@ -92,9 +95,22 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
             class: 'home-hero sh',
             attrs: { style: `--house: ${blockColour(app.house)}` },
           },
-          h('div', { class: 'plinth' }, h('div', { class: 'plinth-shield' }), portrait),
+          h(
+            'div',
+            { class: 'plinth' },
+            h('div', { class: 'plinth-shield' }),
+            portrait,
+            wins > 0 && h('span', { class: 'trophy', attrs: { title: 'Realm Cup champion' } }, icon('cup')),
+          ),
           h('p', { class: 'home-name', text: app.look.name }),
           h('p', { class: 'home-house', text: `House ${app.house.name}` }),
+          wins > 0 &&
+            h(
+              'p',
+              { class: 'home-title' },
+              'Realm Cup champion',
+              wins > 1 && h('span', { class: 'title-count', text: `×${wins}` }),
+            ),
           h('div', { class: 'stats' }, ...buildStatRows(app.look)),
           button('Forge your knight', () => {
             app.go('forge');

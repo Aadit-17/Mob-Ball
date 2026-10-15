@@ -39,10 +39,18 @@ export interface MatchSession {
   resultActions(result: MatchResult): readonly ResultAction[];
 }
 
+/** A run in progress, or finished but not yet dismissed, shown on the mode's home card. */
+export interface ModeProgress {
+  readonly note: string;
+  /** The home card's button, e.g. "Continue cup". */
+  readonly action: string;
+}
+
 export interface GameMode {
   readonly id: string;
   readonly name: string;
   readonly blurb: string;
   readonly available: boolean;
+  progress?(app: AppContext): ModeProgress | null;
   start(app: AppContext): void;
 }

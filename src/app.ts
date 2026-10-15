@@ -1,16 +1,29 @@
 import { DIFFICULTIES, type Difficulty } from './ai/skills';
 import { createRng, randomSeed } from './game/rng';
 import type { Look } from './knight/look';
+import type { CupState } from './modes/cup/bracket';
 import type { MatchSession } from './modes/mode';
 import { houseById, HOUSES, type House } from './setup/houses';
 import { createSquads, rollRivals, setTeamTier, withTier, type Squads } from './setup/squads';
-import { loadLook, loadPreferences, saveLook, savePreferences, type Preferences } from './storage';
+import {
+  loadCup,
+  loadHonours,
+  loadLook,
+  loadPreferences,
+  saveCup,
+  saveHonours,
+  saveLook,
+  savePreferences,
+  type Honours,
+  type Preferences,
+} from './storage';
+import { mountCup } from './ui/screens/cup';
 import { mountForge } from './ui/screens/forge';
 import { mountHome } from './ui/screens/home';
 import { mountMatch } from './ui/screens/match';
 import { mountSetup } from './ui/screens/setup';
 
-export type ScreenId = 'home' | 'forge' | 'setup' | 'match';
+export type ScreenId = 'home' | 'forge' | 'setup' | 'match' | 'cup';
 
 /** What every screen can see and change. */
 export interface AppContext {
@@ -30,6 +43,11 @@ export interface AppContext {
   /** The match being played, set by whichever mode started it. */
   readonly session: MatchSession | null;
   playMatch(session: MatchSession): void;
+  /** The Realm Cup run in progress or just finished; saved on every change. */
+  readonly cup: CupState | null;
+  setCup(cup: CupState | null): void;
+  readonly honours: Honours;
+  addCupWin(): void;
 }
 
 type Mount = (root: HTMLElement, app: AppContext) => () => void;
@@ -39,6 +57,7 @@ const SCREENS: Record<ScreenId, Mount> = {
   forge: mountForge,
   setup: mountSetup,
   match: mountMatch,
+  cup: mountCup,
 };
 
 export class App implements AppContext {
@@ -47,6 +66,8 @@ export class App implements AppContext {
   squads: Squads;
   rival: House;
   session: MatchSession | null = null;
+  cup = loadCup();
+  honours = loadHonours();
   private unmount: (() => void) | null = null;
 
   constructor(private readonly root: HTMLElement) {
@@ -101,6 +122,16 @@ export class App implements AppContext {
   rerollSquads(): void {
     this.rival = this.pickRival();
     this.squads = this.buildSquads();
+  }
+
+  setCup(cup: CupState | null): void {
+    this.cup = cup;
+    saveCup(cup);
+  }
+
+  addCupWin(): void {
+    this.honours = { ...this.honours, cupWins: this.honours.cupWins + 1 };
+    saveHonours(this.honours);
   }
 
   playMatch(session: MatchSession): void {

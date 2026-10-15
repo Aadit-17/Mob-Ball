@@ -277,6 +277,46 @@ kbd {
   font-size: 15px;
 }
 
+/* A Realm Cup won: a trophy medallion on the plinth and a title under the name. */
+.trophy {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #3a3340, var(--iron-fill));
+  color: var(--gold);
+  box-shadow:
+    inset 0 0 0 2px var(--gold-rim),
+    0 4px 0 var(--drop);
+}
+
+.trophy svg {
+  width: 26px;
+  height: 26px;
+}
+
+.home-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  color: var(--gold-text);
+  font: 700 14px/1.2 var(--font-head);
+  white-space: nowrap;
+}
+
+.title-count {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: linear-gradient(var(--gold-hi), #e2ad46);
+  color: var(--on-gold);
+  font: 800 14px/1.4 var(--font-hud);
+}
+
 .home-hero .stats {
   margin: 10px 0 16px;
 }
@@ -345,6 +385,20 @@ kbd {
 
 .mode-foot {
   margin-top: 10px;
+}
+
+.mode .mode-progress {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold-text);
+  font-weight: 700;
+}
+
+.mode-progress::before {
+  content: '◆';
+  font-size: 11px;
 }
 
 .home-foot {
@@ -1217,6 +1271,493 @@ kbd {
   top: 58px;
 }
 
+/* ---------- realm cup ---------- */
+.cup-screen {
+  --gap: 36px;
+}
+
+.cup-hero {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.cup-screen .hint {
+  margin: 0 2px;
+}
+
+.cup-ladder {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cup-ladder .ladder-step {
+  --clip: var(--clip-pennant);
+  --rim: var(--iron);
+  --fill: linear-gradient(180deg, #332e38, #25222a);
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 12px 10px 28px;
+  text-align: center;
+}
+
+.cup-ladder .ladder-step:last-child {
+  --rim: linear-gradient(180deg, var(--gold-hi), var(--gold-lo));
+  --fill:
+    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(242, 193, 78, 0.2), transparent 70%),
+    linear-gradient(180deg, #3a3340, #2a252e);
+}
+
+.cup-ladder b {
+  color: #fff3d6;
+  font: 700 17px/1.2 var(--font-head);
+}
+
+.cup-ladder .stars,
+.cup-screen .tier .stars {
+  color: var(--gold-text);
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+
+.cup-ladder small {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.cup-field {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  color: var(--text-2);
+  font: 700 15px/1.2 var(--font-body);
+}
+
+.field-house {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.field-house.is-you {
+  color: var(--gold-text);
+}
+
+/* A house shield: a gold rim around the house colour with its charge. */
+.tie-shield {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 26px;
+  flex: none;
+  padding-bottom: 4px;
+  background: #f2d38a;
+  clip-path: var(--clip-shield);
+}
+
+.tie-shield::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  background: var(--c);
+  clip-path: var(--clip-shield);
+}
+
+.tie-shield.is-empty {
+  background: var(--iron);
+}
+
+.tie-shield.is-empty::before {
+  background: var(--well);
+}
+
+.tie-shield .crest {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  color: #fbe9b8;
+}
+
+.cup-next,
+.cup-verdict,
+.cup-champion {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 0 20px 22px;
+  text-align: center;
+}
+
+.cup-next .ribbon,
+.cup-verdict .ribbon,
+.cup-champion .ribbon {
+  min-width: min(100%, 320px);
+}
+
+.cup-next.is-waiting {
+  padding-bottom: 18px;
+}
+
+.cup-next.is-waiting .cup-level::after {
+  content: ' ◆';
+  display: inline-block;
+  color: var(--gold);
+  animation: beckon 1s ease-in-out infinite alternate;
+}
+
+.face-off {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding-top: 6px;
+}
+
+.face-side {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.face-side b {
+  color: #fff3d6;
+  font: 700 19px/1.2 var(--font-head);
+}
+
+.vs {
+  color: var(--gold);
+  font: 900 34px/1 var(--font-logo);
+  filter: drop-shadow(0 3px 0 var(--bronze-shadow));
+}
+
+.cup-level {
+  max-width: 620px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 16px;
+}
+
+.cup-next .cards {
+  width: min(100%, 560px);
+}
+
+.cup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.cup-verdict .verdict {
+  margin: 0;
+}
+
+/* The tournament tree. Each slot draws half of the bracket line to its pair's midpoint. */
+.bracket {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 0.8fr);
+  column-gap: var(--gap);
+  padding: 14px 18px 18px;
+}
+
+.cup-round {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cup-round h3 {
+  margin: 0 0 6px;
+  color: var(--gold-rim);
+  font-size: 15px;
+  letter-spacing: 1px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.round-ties,
+.tie-pair {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.tie-slot {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  padding: 7px 0;
+}
+
+.tie-slot::after,
+.tie-pair::after {
+  content: '';
+  position: absolute;
+  border: 0 solid var(--iron);
+  pointer-events: none;
+}
+
+.cup-round:not(.is-final) .tie-slot::after {
+  left: 100%;
+  width: calc(var(--gap) / 2);
+  border-right-width: 2px;
+}
+
+.cup-round:not(.is-final) .tie-slot:first-child::after {
+  top: 50%;
+  bottom: -1px;
+  border-top-width: 2px;
+  border-top-right-radius: 8px;
+}
+
+.cup-round:not(.is-final) .tie-slot:last-child::after {
+  top: -1px;
+  bottom: 50%;
+  border-bottom-width: 2px;
+  border-bottom-right-radius: 8px;
+}
+
+.cup-round:not(.is-final) .tie-pair::after {
+  top: 50%;
+  left: calc(100% + var(--gap) / 2);
+  width: calc(var(--gap) / 2);
+  border-top-width: 2px;
+}
+
+.cup-round.is-final .tie-slot::after {
+  top: 50%;
+  left: 100%;
+  width: var(--gap);
+  border-top-width: 2px;
+}
+
+.tie-slot.is-path::after,
+.tie-pair.is-path::after {
+  z-index: 1;
+  border-color: var(--gold);
+}
+
+.tie {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #332e38, #25222a);
+  box-shadow:
+    inset 0 0 0 2px var(--iron),
+    0 3px 0 var(--drop);
+}
+
+.tie.is-mine {
+  box-shadow:
+    inset 0 0 0 2px var(--gold),
+    0 3px 0 var(--drop);
+}
+
+.tie.is-next {
+  animation: beckon 1.6s ease-in-out infinite alternate;
+}
+
+.tie.is-fresh {
+  animation: result-in 0.6s var(--ease-out);
+}
+
+@keyframes beckon {
+  from {
+    filter: drop-shadow(0 0 0 rgba(242, 193, 78, 0));
+  }
+  to {
+    filter: drop-shadow(0 0 8px rgba(242, 193, 78, 0.7));
+  }
+}
+
+@keyframes result-in {
+  0% {
+    transform: scale(0.94);
+    filter: brightness(1.8);
+  }
+  100% {
+    transform: none;
+    filter: none;
+  }
+}
+
+.tie-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 4px 4px 9px;
+  color: var(--text);
+  font: 700 16px/1.2 var(--font-hud);
+  letter-spacing: 0.4px;
+}
+
+.tie-side + .tie-side {
+  border-top: 1px solid rgba(156, 132, 96, 0.4);
+}
+
+.side-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tie-side.is-won {
+  color: #fff3d6;
+}
+
+.tie-side.is-lost {
+  color: var(--text-2);
+}
+
+.tie-side.is-lost .tie-shield,
+.tie-side.is-lost .side-name {
+  opacity: 0.6;
+}
+
+.tie-side.is-tbd .side-name {
+  color: var(--text-2);
+  font: italic 500 15px/1.2 var(--font-body);
+}
+
+.tie-side.is-you .side-name {
+  color: var(--gold-text);
+}
+
+.you-tag {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: linear-gradient(var(--gold-hi), #e2ad46);
+  color: var(--on-gold);
+  font: 800 12px/1.5 var(--font-hud);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.tie-goals {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  flex: none;
+  border-radius: 5px;
+  background: var(--well);
+  color: var(--text-2);
+  font: 800 18px/1 var(--font-hud);
+  font-variant-numeric: tabular-nums;
+}
+
+.tie-side.is-won .tie-goals {
+  color: var(--gold-text);
+}
+
+.cup-crown {
+  --clip: var(--clip-pennant);
+  --rim: var(--iron);
+  --fill: linear-gradient(180deg, #332e38, #25222a);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  margin: auto 0;
+  padding: 14px 8px 32px;
+  text-align: center;
+}
+
+.cup-crown.is-won {
+  --rim: linear-gradient(180deg, var(--gold-hi), var(--gold-lo));
+  --fill:
+    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(242, 193, 78, 0.28), transparent 70%),
+    linear-gradient(180deg, #3a3340, #2a252e);
+}
+
+.crown-cup {
+  width: 44px;
+  height: 44px;
+  color: var(--iron);
+}
+
+.cup-crown.is-won .crown-cup {
+  color: var(--gold);
+}
+
+.crown-cup svg,
+.champion-cup svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cup-crown b {
+  color: var(--text-2);
+  font: 700 16px/1.2 var(--font-head);
+}
+
+.cup-crown.is-won b {
+  color: #fff3d6;
+}
+
+.cup-crown.is-you b {
+  color: var(--gold-text);
+}
+
+/* The champion screen. */
+.champion-stage {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 18px;
+}
+
+.champion-cup {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 40px;
+  color: var(--gold);
+  filter: drop-shadow(0 3px 0 var(--bronze-shadow));
+}
+
+.cup-title {
+  margin: 0;
+  font: 900 clamp(30px, 5vw, 52px) / 1.1 var(--font-logo);
+}
+
+.cup-tally {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 14px 4px 10px;
+  border-radius: 999px;
+  background: var(--iron-fill);
+  color: var(--gold-text);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 2px var(--gold-rim);
+}
+
+.cup-tally svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cup-fx {
+  position: fixed;
+  z-index: 20;
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 1250px) {
   .home .torches {
@@ -1233,6 +1774,32 @@ kbd {
   .forge-grid,
   .lineups {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The tree is too wide for a narrow screen, so its rounds stack, read top to bottom. */
+  .bracket {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 14px;
+  }
+
+  .tie-slot,
+  .tie-pair,
+  .round-ties {
+    flex: none;
+  }
+
+  .tie-slot {
+    padding: 4px 0;
+  }
+
+  .tie-slot::after,
+  .tie-pair::after {
+    display: none;
+  }
+
+  .cup-crown {
+    margin: 0 auto;
+    min-width: 220px;
   }
 
   .forge-preview {
@@ -1288,6 +1855,31 @@ kbd {
 
   .setup-actions .btn-primary {
     margin-left: 0;
+  }
+
+  .cup-ladder {
+    gap: 6px;
+  }
+
+  .cup-ladder .ladder-step {
+    padding: 10px 4px 24px;
+  }
+
+  .cup-ladder b {
+    font-size: 14px;
+  }
+
+  .face-off {
+    gap: 14px;
+  }
+
+  .cup-next .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .champion-cup {
+    width: 40px;
+    height: 40px;
   }
 
   .board .crest {
