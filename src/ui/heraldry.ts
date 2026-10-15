@@ -24,6 +24,25 @@ const ARMS: Readonly<Record<string, Arms>> = {
     block: '#2f6fb5',
     charge: '<path d="M5 3h3v3h2V3h4v3h2V3h3v6l-2 2v10h-4v-4a1 1 0 0 0-2 0v4H7V11L5 9z"/>',
   },
+  mud: {
+    block: '#8a5a26',
+    charge: '<path d="M6 21L4.5 11a7.5 7.5 0 0 1 15 0L18 21h-4l1.2-10a3.2 3.2 0 0 0-6.4 0L10 21z"/>',
+  },
+  hollow: {
+    block: '#7b45b0',
+    charge:
+      '<path fill-rule="evenodd" d="M2 12c3-5 9-7 14-3l5-4v14l-5-4c-5 4-11 2-14-3zm6-1.6a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z"/>',
+  },
+  ox: {
+    block: '#b03a72',
+    charge:
+      '<path d="M2 4c0 4 3 6.5 6.5 6.5h7C19 10.5 22 8 22 4c-2 2-4 2.5-6.5 2.5h-7C6 6.5 4 6 2 4z"/><path d="M7.5 10.5h9L15 19a3 3 0 0 1-6 0z"/>',
+  },
+  salt: {
+    block: '#16766f',
+    charge:
+      '<path fill-rule="evenodd" d="M12 1a2.6 2.6 0 1 1 0 5.2A2.6 2.6 0 0 1 12 1zm0 1.5a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2z"/><path d="M8 7.5h8v2H8zM11 6h2v15h-2z"/><path d="M2.5 13.5 6 10l3 3.5H7a5 5 0 0 0 10 0h-2l3-3.5 3.5 3.5h-2a8.5 8.5 0 0 1-17 0z"/>',
+  },
 };
 
 function armsOf(house: House): Arms {
