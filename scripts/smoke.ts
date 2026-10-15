@@ -1,13 +1,22 @@
 /// <reference types="node" />
 /**
- * Browser smoke test: builds the game, serves it, and plays a full match in headless Chromium.
- * Fails on any console error or warning, and reports the JS heap along the way.
+ * Browser smoke test: builds the game, serves it, plays a full match in headless Chromium, then
+ * starts a Realm Cup. Fails on any console error or warning, and reports the JS heap along the way.
  *
  *   npm run smoke                                   (first run: `npx playwright install chromium`)
  *   SMOKE_URL=https://mob-ball.pages.dev npx tsx scripts/smoke.ts   (check a deployed site instead)
  */
 import { chromium, type Locator, type Page } from 'playwright';
 import { preview } from 'vite';
+import {
+  drawCup,
+  pendingSimulations,
+  playerFixture,
+  recordPlayerResult,
+  recordResult,
+  type CupState,
+} from '../src/modes/cup/bracket';
+import { REALM_HOUSES } from '../src/setup/houses';
 
 const MATCH_TIMEOUT_MS = 240_000;
 const MOVE_KEYS = ['w', 'a', 's', 'd'] as const;
@@ -22,6 +31,70 @@ async function heapMb(page: Page): Promise<string> {
 async function expectPressed(button: Locator, expected: string, failure: string): Promise<void> {
   const actual = await button.getAttribute('aria-pressed');
   if (actual !== expected) throw new Error(`${failure} (aria-pressed=${actual ?? 'missing'})`);
+}
+
+async function shot(page: Page, name: string, fullPage = true): Promise<void> {
+  const dir = process.env.SMOKE_SHOTS;
+  if (!dir) return;
+  await page.locator('.gates').waitFor({ state: 'detached' });
+  await page.screenshot({ path: `${dir}/${name}.png`, fullPage });
+}
+
+/** A cup the player has won, every tie settled, for screenshots of the champion screen. */
+function wonCup(): CupState {
+  let cup = drawCup(
+    { seed: 5, levelId: 'knight', teamSize: 4, playerHouse: 'ember' },
+    REALM_HOUSES.map((h) => h.id),
+  );
+  for (let round = 0; round < 3; round++) {
+    const mine = playerFixture(cup);
+    if (!mine) throw new Error('Expected a cup match to play');
+    cup = recordPlayerResult(cup, mine, [3, round]);
+    for (const f of pendingSimulations(cup)) cup = recordResult(cup, f.round, f.index, [2, 1]);
+  }
+  return cup;
+}
+
+/** Starts a Realm Cup, kicks off the quarter-final, quits, and checks the cup can be resumed. */
+async function playCup(page: Page): Promise<void> {
+  const cupCard = page.locator('.mode', { hasText: 'Realm Cup' });
+  await cupCard.getByRole('button', { name: 'Play' }).click();
+  await page.getByRole('button', { name: 'Draw the bracket' }).click();
+  await page.locator('.bracket').waitFor();
+  const ties = await page.locator('.bracket .tie').count();
+  if (ties !== 7) throw new Error(`Bracket shows ${ties} ties, expected 7`);
+  await shot(page, 'cup-bracket');
+  await page.getByRole('button', { name: 'Play quarter-final' }).click();
+  await page.waitForSelector('canvas.pitch');
+  await page.waitForTimeout(1500);
+  console.log(`cup quarter-final started · heap ${await heapMb(page)} MB`);
+  await page.getByRole('button', { name: 'Pause (Esc)' }).click();
+  await page.getByRole('button', { name: 'Quit to home' }).click();
+  await page.locator('.modes').waitFor();
+
+  await page.reload();
+  const note = await cupCard.locator('.mode-progress').textContent();
+  if (!note?.startsWith('Quarter-final next, against'))
+    throw new Error(`Home does not offer the cup in progress (shows ${note ?? 'nothing'})`);
+  await cupCard.getByRole('button', { name: 'Continue cup' }).click();
+  await page.getByRole('button', { name: 'Play quarter-final' }).waitFor();
+  console.log(`cup resumed from home: ${note}`);
+
+  if (!process.env.SMOKE_SHOTS) return;
+  await page.evaluate((cup) => {
+    localStorage.setItem('mobball.cup.v1', JSON.stringify(cup));
+    localStorage.setItem('mobball.honours.v1', JSON.stringify({ cupWins: 2 }));
+  }, wonCup());
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(page.url());
+    await page.locator('.trophy').waitFor();
+    await shot(page, `home-trophy-${width}`);
+    await cupCard.getByRole('button', { name: 'See the cup' }).click();
+    await page.locator('.cup-champion').waitFor();
+    await page.waitForTimeout(900);
+    await shot(page, `cup-champion-${width}`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -126,6 +199,15 @@ async function main(): Promise<void> {
     await page.getByRole('button', { name: 'Mute sound' }).click();
     await page.reload();
     await expectPressed(page.getByRole('button', { name: 'Mute sound' }), 'true', 'Mute was not remembered');
+
+    await playCup(page);
+    if (process.env.SMOKE_SHOTS) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.getByRole('button', { name: 'Play another cup' }).click();
+      await page.getByRole('button', { name: 'Draw the bracket' }).click();
+      await page.locator('.bracket').waitFor();
+      await shot(page, 'cup-bracket-390');
+    }
   } finally {
     await browser.close();
     server?.httpServer.close();
