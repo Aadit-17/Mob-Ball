@@ -156,6 +156,20 @@ export const KNIGHT_NAMES = [
   'Big Edda',
   'Merek',
   'Lady Rowena',
+  'Ser Baldric',
+  'Godric',
+  'Lady Elsbeth',
+  'Ser Hamo',
+  'Roger Mudlark',
+  'Brother Anselm',
+  'Ser Ranulf',
+  'Tilda',
+  'Ser Fulk',
+  'Edwy the Tall',
+  'Gwenllian',
+  'Ser Kay',
+  'Old Nan Ashby',
+  'Ser Alard',
 ] as const;
 
 /** Looks up a catalogue entry, falling back to the first one for an out-of-range index. */
