@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "balance": "vitest run --config scripts/vitest.config.ts --reporter=verbose -t 'balance report'",
-    "smoke": "vite build && tsx scripts/smoke.ts"
+    "smoke": "vite build && tsx scripts/smoke.ts",
+    "og-image": "tsx scripts/og-image.ts"
   },
   "engines": {
     "node": ">=20"

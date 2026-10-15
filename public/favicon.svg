@@ -1,1 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="28" fill="#d49356" stroke="#2a1e3b" stroke-width="5"/><path d="M14 22c10 6 26 6 36 0M14 42c10-6 26-6 36 0" fill="none" stroke="#7a4a24" stroke-width="4" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="stone" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2832"/>
+      <stop offset="1" stop-color="#1d1a21"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6d0"/>
+      <stop offset=".3" stop-color="#ffd978"/>
+      <stop offset=".55" stop-color="#d9962e"/>
+      <stop offset=".75" stop-color="#f6cf6a"/>
+      <stop offset="1" stop-color="#fff0b8"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#stone)"/>
+  <path d="M10 7H54V29C54 44 44 53 32 59C20 53 10 44 10 29Z" fill="#3b2510"/>
+  <path d="M12.5 9.5H51.5V29C51.5 42.5 42.6 50.6 32 56.2C21.4 50.6 12.5 42.5 12.5 29Z" fill="url(#gold)"/>
+  <circle cx="32" cy="30" r="13" fill="#1f1c22"/>
+  <path d="M21.5 23.5C27.5 27.5 36.5 27.5 42.5 23.5M21.5 36.5C27.5 32.5 36.5 32.5 42.5 36.5" fill="none" stroke="#f2c14e" stroke-width="3" stroke-linecap="round"/>
+</svg>
