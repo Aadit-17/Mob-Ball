@@ -1,9 +1,9 @@
 import type { AppContext, ScreenId } from '../app';
-import type { Tactics, TeamTactics } from '../ai/tactics';
+import type { Tactics } from '../ai/tactics';
 import type { KnightSpec } from '../game/match';
 import type { TeamId } from '../game/types';
 import type { House } from '../setup/houses';
-import type { Manager } from './runner';
+import type { FixtureConfig, TimedAction } from './runner';
 
 export interface GoalRecord {
   readonly team: TeamId;
@@ -18,6 +18,10 @@ export interface GoalRecord {
 export interface MatchResult {
   readonly score: readonly [number, number];
   readonly goals: readonly GoalRecord[];
+  /** Simulation steps the match lasted. */
+  readonly steps: number;
+  /** Changes made from the dugout, with the step each took effect. */
+  readonly timeline: readonly TimedAction[];
 }
 
 export interface Dugout {
@@ -44,13 +48,11 @@ export interface MatchSession {
   readonly awayHouse: House;
   /** Where "quit" from the pause menu goes. */
   readonly quitTo: ScreenId;
-  /** Set by modes whose matches must replay identically; otherwise a fresh seed, default tactics, golden goal. */
-  readonly fixture?: {
-    readonly seed: number;
-    readonly tactics?: TeamTactics;
-    readonly draws?: boolean;
-    readonly managers?: readonly [Manager | null, Manager | null];
-  };
+  /**
+   * For modes whose matches must replay identically: a fresh runner config, rival managers and all, for
+   * every kick-off. Otherwise the line-ups above with a random seed, default tactics and golden goal.
+   */
+  readonly fixture?: () => FixtureConfig;
   /** Nobody on the pitch is the player's: the match is watched, with speed controls and a skip. */
   readonly spectate?: boolean;
   /** The home manager's options when a watched match is paused: substitutes and one-tap tactics. */

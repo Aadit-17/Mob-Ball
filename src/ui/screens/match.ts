@@ -48,15 +48,9 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   const { homeHouse, awayHouse } = session;
   // Assigned once the overlay exists; the HUD's pause button only calls it on click.
   let togglePause = (): void => undefined;
-  const { fixture } = session;
-  const runner = new MatchRunner({
-    home: session.home,
-    away: session.away,
-    seed: fixture?.seed ?? randomSeed(),
-    ...(fixture?.tactics ? { tactics: fixture.tactics } : {}),
-    ...(fixture?.draws ? { draws: true } : {}),
-    ...(fixture?.managers ? { managers: fixture.managers } : {}),
-  });
+  const runner = new MatchRunner(
+    session.fixture?.() ?? { home: session.home, away: session.away, seed: randomSeed() },
+  );
   const state: MatchState = runner.state;
   const duration = state.clock;
   const human = state.knights.find((k) => k.human);
@@ -391,7 +385,12 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   }
 
   function showResults(): void {
-    const result: MatchResult = { score: [state.score[0], state.score[1]], goals };
+    const result: MatchResult = {
+      score: [state.score[0], state.score[1]],
+      goals,
+      steps: runner.step,
+      timeline: runner.timeline,
+    };
     const [us, them] = result.score;
     const verdict = us > them ? 'Victory!' : us < them ? 'Defeat' : 'Draw';
     const scorers = h(
