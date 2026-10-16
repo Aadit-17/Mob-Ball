@@ -1,15 +1,10 @@
-import { BotBrain } from '../../ai/brain';
 import type { TeamSize } from '../../game/formation';
-import { createMatch, stepMatch } from '../../game/match';
 import { createRng } from '../../game/rng';
-import { STEP } from '../../game/constants';
 import type { House } from '../../setup/houses';
 import { rosterLineup } from '../../setup/rosters';
 import { rollRivals } from '../../setup/squads';
+import { MatchRunner } from '../runner';
 import type { Score } from './bracket';
-
-/** Ten minutes of golden goal: bots settle it well within one, so this only guards the loop. */
-const GOLDEN_GOAL_LIMIT = 600 / STEP;
 
 export interface SimulatedMatch {
   /** Plays up to `steps` simulation steps; returns the score once the match is over, else null. */
@@ -25,21 +20,12 @@ export function simulateMatch(
 ): SimulatedMatch {
   const rng = createRng(seed);
   const lineup = (house: House) => rollRivals(rosterLineup(house, teamSize), meanTier, rng);
-  const state = createMatch({ home: lineup(houses[0]), away: lineup(houses[1]), seed });
-  const brain = new BotBrain();
-  let goldenSteps = 0;
+  const runner = new MatchRunner({ home: lineup(houses[0]), away: lineup(houses[1]), seed });
   return {
     advance(steps) {
-      for (let i = 0; i < steps && state.phase !== 'ended'; i++) {
-        stepMatch(state, (k) => brain.input(state, k));
-        state.events = [];
-        if (state.goldenGoal && ++goldenSteps > GOLDEN_GOAL_LIMIT) {
-          // Never seen in testing; settle it by lot so the bracket can always go on.
-          state.score[rng.next() < 0.5 ? 0 : 1] += 1;
-          state.phase = 'ended';
-        }
-      }
-      return state.phase === 'ended' ? [state.score[0], state.score[1]] : null;
+      runner.advance(steps);
+      const { score } = runner.state;
+      return runner.ended ? [score[0], score[1]] : null;
     },
   };
 }

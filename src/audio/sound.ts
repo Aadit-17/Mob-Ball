@@ -222,7 +222,8 @@ class Sound {
   }
 
   handle(event: MatchEvent): void {
-    this.play(event.type === 'kick' && event.boost > 1 ? 'kick-boost' : event.type);
+    if (event.type === 'substitution') this.play('whistle');
+    else this.play(event.type === 'kick' && event.boost > 1 ? 'kick-boost' : event.type);
   }
 
   play(cue: Cue): void {

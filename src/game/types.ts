@@ -68,10 +68,15 @@ export type MatchEvent =
   | { type: 'barge'; x: number; y: number; attackerId: number; victimId: number }
   | { type: 'goal'; team: TeamId; scorerId: number | null; ownGoal: boolean }
   | { type: 'golden-goal' }
+  | { type: 'substitution'; team: TeamId; offId: number; onId: number }
   | { type: 'full-time' };
 
 export interface MatchState {
   readonly knights: Knight[];
+  /** Knights substituted off, kept so their earlier goals and touches still credit them. */
+  readonly substituted: Knight[];
+  /** A level score at full time ends the match instead of going to golden goal. */
+  readonly draws: boolean;
   readonly ball: Ball;
   readonly posts: readonly Body[];
   readonly score: [number, number];

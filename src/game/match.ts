@@ -27,46 +27,52 @@ export interface MatchConfig {
   readonly away: readonly KnightSpec[];
   readonly seed: number;
   readonly duration?: number;
+  /** League matches can end level; otherwise a level score goes to golden goal. */
+  readonly draws?: boolean;
 }
 
 /** Kicks from the human toward the rival goal get pulled toward the side its keeper isn't covering. */
 export const AIM_ASSIST = { range: 520, cone: 0.64, blend: 0.55, cornerInset: 30, keeperDepth: 240 } as const;
 
+function makeKnight(spec: KnightSpec, team: TeamId, id: number, spot: { x: number; y: number }): Knight {
+  const build = BUILDS[spec.look.build] ?? BUILDS[1];
+  if (!build) throw new Error('No builds defined');
+  return {
+    id,
+    team,
+    role: spec.role,
+    look: spec.look,
+    build,
+    human: spec.human,
+    tier: spec.tier,
+    speedFactor: spec.speedFactor,
+    x: spot.x,
+    y: spot.y,
+    vx: 0,
+    vy: 0,
+    radius: build.radius,
+    mass: build.mass,
+    facing: team === 0 ? 1 : -1,
+    kickHeld: false,
+    kickCooldown: 0,
+    bargeTime: 0,
+    bargeCooldown: 0,
+    bargeDirX: 0,
+    bargeDirY: 0,
+    stun: 0,
+    runPhase: 0,
+  };
+}
+
 export function createMatch(config: MatchConfig): MatchState {
   let nextId = 0;
-  const makeKnight = (spec: KnightSpec, team: TeamId): Knight => {
-    const build = BUILDS[spec.look.build] ?? BUILDS[1];
-    if (!build) throw new Error('No builds defined');
-    const spot = kickoffSpot(spec.role, team);
-    return {
-      id: nextId++,
-      team,
-      role: spec.role,
-      look: spec.look,
-      build,
-      human: spec.human,
-      tier: spec.tier,
-      speedFactor: spec.speedFactor,
-      x: spot.x,
-      y: spot.y,
-      vx: 0,
-      vy: 0,
-      radius: build.radius,
-      mass: build.mass,
-      facing: team === 0 ? 1 : -1,
-      kickHeld: false,
-      kickCooldown: 0,
-      bargeTime: 0,
-      bargeCooldown: 0,
-      bargeDirX: 0,
-      bargeDirY: 0,
-      stun: 0,
-      runPhase: 0,
-    };
-  };
+  const knight = (spec: KnightSpec, team: TeamId): Knight =>
+    makeKnight(spec, team, nextId++, kickoffSpot(spec.role, team));
   const post = (x: number, y: number): Body => ({ x, y, vx: 0, vy: 0, radius: POST.radius, mass: Infinity });
   return {
-    knights: [...config.home.map((s) => makeKnight(s, 0)), ...config.away.map((s) => makeKnight(s, 1))],
+    knights: [...config.home.map((s) => knight(s, 0)), ...config.away.map((s) => knight(s, 1))],
+    substituted: [],
+    draws: config.draws ?? false,
     ball: centreBall(),
     posts: [
       post(PITCH.left, PITCH.goalTop),
@@ -157,7 +163,7 @@ function advancePhase(state: MatchState, dt: number): void {
     case 'play':
       state.clock = Math.max(0, state.clock - dt);
       if (state.clock === 0 && !state.goldenGoal) {
-        if (state.score[0] !== state.score[1]) endMatch(state);
+        if (state.draws || state.score[0] !== state.score[1]) endMatch(state);
         else {
           state.goldenGoal = true;
           state.events.push({ type: 'golden-goal' });
@@ -296,4 +302,26 @@ function creditedScorer(state: MatchState, scoringTeam: TeamId): Knight | undefi
 }
 
 export const knightById = (state: MatchState, id: number | null): Knight | undefined =>
-  id === null ? undefined : state.knights.find((k) => k.id === id);
+  id === null
+    ? undefined
+    : (state.knights.find((k) => k.id === id) ?? state.substituted.find((k) => k.id === id));
+
+/** How far from the halfway line, on his own side, a substitute comes on at the top touchline. */
+const SUB_ENTRY_GAP = 40;
+
+/**
+ * Swaps a knight for a fresh one in the same role, who comes on at the halfway line by the top
+ * touchline. The new knight gets a new id, so bots treat him as a new teammate with no memory.
+ */
+export function substitute(state: MatchState, offId: number, on: KnightSpec): Knight {
+  const index = state.knights.findIndex((k) => k.id === offId);
+  const off = state.knights[index];
+  if (!off) throw new Error(`No knight ${offId} on the pitch`);
+  const id = Math.max(...state.knights.map((k) => k.id), ...state.substituted.map((k) => k.id)) + 1;
+  const x = PITCH.centerX + (off.team === 0 ? -SUB_ENTRY_GAP : SUB_ENTRY_GAP);
+  const knight = makeKnight({ ...on, role: off.role }, off.team, id, { x, y: PITCH.top });
+  state.knights[index] = knight;
+  state.substituted.push(off);
+  state.events.push({ type: 'substitution', team: off.team, offId, onId: id });
+  return knight;
+}

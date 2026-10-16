@@ -3,6 +3,7 @@ import type { Input, Knight, MatchState } from '../game/types';
 import { clamp, dist, type Vec } from '../game/vec';
 import { bankShot, laneBlocked, predictBall, toward } from './geometry';
 import { skillFor, type Skill } from './skills';
+import { BOTH_DEFAULT, type Tactics, type TeamTactics } from './tactics';
 
 /** Keepers react a little slower than outfielders of the same tier, or nobody could ever score. */
 const KEEPER_REACTION_FACTOR = 1.5;
@@ -57,6 +58,7 @@ interface Context {
   readonly state: MatchState;
   readonly self: Knight;
   readonly skill: Skill;
+  readonly tactics: Tactics;
   readonly memory: Memory;
   readonly me: Seen;
   readonly ball: Seen;
@@ -75,6 +77,13 @@ interface Context {
 /** Scripted bots. One instance drives every non-human knight in a match. */
 export class BotBrain {
   private readonly memory = new Map<number, Memory>();
+
+  constructor(private tactics: TeamTactics = BOTH_DEFAULT) {}
+
+  /** Takes effect from each bot's next decision, as an instruction from the touchline would. */
+  setTactics(tactics: TeamTactics): void {
+    this.tactics = tactics;
+  }
 
   input(state: MatchState, self: Knight, dt: number = STEP): Input {
     const skill = skillFor(self.tier);
@@ -100,7 +109,7 @@ export class BotBrain {
     if (memory.hold <= 0 || !memory.plan) {
       const slow = self.role === 'gk' ? KEEPER_REACTION_FACTOR : 1;
       memory.hold = skill.reaction * slow * (0.7 + state.rng.next() * 0.6);
-      memory.plan = decide(buildContext(state, self, skill, memory));
+      memory.plan = decide(buildContext(state, self, skill, this.tactics[self.team], memory));
     }
     const plan = memory.plan;
     const safe = avoidOwnGoal(state, self, plan);
@@ -182,7 +191,13 @@ function avoidOwnGoal(state: MatchState, self: Knight, plan: Plan): { x: number;
   return { x: ball.x - towardOwnGoal * 4, y: ball.y + side * (self.radius + ball.radius + DETOUR_GAP), kick };
 }
 
-function buildContext(state: MatchState, self: Knight, skill: Skill, memory: Memory): Context {
+function buildContext(
+  state: MatchState,
+  self: Knight,
+  skill: Skill,
+  tactics: Tactics,
+  memory: Memory,
+): Context {
   const sign = self.team === 0 ? 1 : -1;
   const see = (
     o: { x: number; y: number; vx: number; vy: number; radius: number },
@@ -211,6 +226,7 @@ function buildContext(state: MatchState, self: Knight, skill: Skill, memory: Mem
     state,
     self,
     skill,
+    tactics,
     memory,
     me,
     ball,
@@ -250,10 +266,23 @@ const MARK_GAP = 34;
 const LANE_CUT = 0.55;
 /** How much a clear pass to an attacker adds to his danger, in px of closeness to goal. */
 const OPEN_LANE_DANGER = 160;
-/** How far goal-side of the ball the midfielder screens. */
+/** How far goal-side of the ball the midfielder screens, and how far ahead of it the forward waits. */
 const SCREEN_GAP = 110;
-/** How far behind the ball the defender holds the line, unless an attacker has run in behind. */
-const LINE_DEPTH = 200;
+
+/**
+ * What the line tactic moves, in the positioning code's own units; `normal` holds the original values.
+ * depth: how far behind the ball the defender holds the line. floor: the nearest it comes to goal.
+ * screen: the midfielder's gap goal-side of the ball. support: the furthest the defender pushes up in
+ * possession. roleDepth: added to the Squire's share of the pitch held behind the ball.
+ */
+const LINES = {
+  deep: { depth: 270, floor: 110, screen: 80, support: PITCH.right - 420, roleDepth: -0.1 },
+  normal: { depth: 200, floor: 140, screen: SCREEN_GAP, support: PITCH.right - 320, roleDepth: 0 },
+  high: { depth: 130, floor: 200, screen: 150, support: PITCH.right - 230, roleDepth: 0.1 },
+} as const satisfies Record<Tactics['line'], object>;
+
+/** With a low press the nearest knight only steps out while the ball is this far into the rivals' half, at most. */
+const LOW_PRESS_REACH = 40;
 /** An attacker this far nearer our goal than the ball has run in behind and gets marked. */
 const IN_BEHIND = 40;
 /** How far along the lane to the carrier's outlet the forward stands to cut the pass back. */
@@ -274,7 +303,7 @@ function outfield(ctx: Context): Plan {
   if (skill.positioning === 'swarm' || carrier === self) return carry(ctx);
 
   const rank = ballRank(ctx);
-  const pressing = rank === 0 && carrier?.team !== self.team;
+  const pressing = presses(ctx, rank);
   memory.duty = pressing ? 'press' : null;
   if (!ours || pressing) memory.run = null;
   if (pressing) return carry(ctx);
@@ -292,6 +321,16 @@ function outfield(ctx: Context): Plan {
   if (skill.positioning === 'roles') return roleSpot(ctx);
   if (ours) return self.role === 'def' ? supportAngle(ctx) : runIntoSpace(ctx);
   return shape(ctx);
+}
+
+/**
+ * Whether this bot goes for the ball. The nearest always contests a loose ball; against a rival carrier
+ * a low press waits for him to reach our half, and a high press sends the second nearest too.
+ */
+function presses({ tactics, carrier, self, ball }: Context, rank: number): boolean {
+  if (carrier?.team === self.team) return false;
+  if (rank === 0) return tactics.press !== 'low' || !carrier || ball.x < PITCH.centerX + LOW_PRESS_REACH;
+  return rank === 1 && tactics.press === 'high' && carrier !== null;
 }
 
 /** Opponents who could receive a pass from the carrier. */
@@ -325,27 +364,27 @@ function cover(ctx: Context): Plan | null {
 
 /** Squire positions: each role holds its own spot, shifted with the ball. */
 function roleSpot(ctx: Context): Plan {
-  const { ball, self, ours } = ctx;
+  const { ball, self, ours, tactics } = ctx;
   const y = PITCH.centerY + (ball.y - PITCH.centerY) * 0.55;
   if (self.role === 'fwd')
     return hold(clamp(ball.x + (ours ? 170 : 110), PITCH.left + 200, PITCH.right - 90), y);
-  const depth = self.role === 'def' ? 0.45 : 0.7;
+  const depth = (self.role === 'def' ? 0.45 : 0.7) + LINES[tactics.line].roleDepth;
   return hold(Math.min(PITCH.left + (ball.x - PITCH.left) * depth, PITCH.centerX - 50), y);
 }
 
 /** Out of possession, beyond the press and the cover: a compact block that moves with the ball and the runners. */
 function shape(ctx: Context): Plan {
   const { ball, me, self } = ctx;
+  const line = LINES[ctx.tactics.line];
   switch (self.role) {
     case 'def': {
       if (ball.x < me.x - 10) return carry(ctx);
       const deepest = track(ctx, attackers(ctx), (o) => -o.x);
       if (deepest && deepest.x < ball.x - IN_BEHIND) return at(toward(deepest, OWN_GOAL, MARK_GAP));
-      const line = Math.max(140, dist(OWN_GOAL, ball) - LINE_DEPTH);
-      return at(toward(OWN_GOAL, ball, line));
+      return at(toward(OWN_GOAL, ball, Math.max(line.floor, dist(OWN_GOAL, ball) - line.depth)));
     }
     case 'mid':
-      return at(toward(ball, OWN_GOAL, SCREEN_GAP));
+      return at(toward(ball, OWN_GOAL, line.screen));
     default: {
       const outlet = track(ctx, attackers(ctx), (o) => o.x);
       if (outlet && outlet.x > ball.x) return at(toward(ball, outlet, dist(ball, outlet) * OUTLET_CUT));
@@ -357,13 +396,11 @@ function shape(ctx: Context): Plan {
 /** How far behind the ball the defender offers the pass back, angled toward the middle. */
 const SUPPORT_DEPTH = 170;
 const SUPPORT_ANGLE = 0.35;
-/** The defender never pushes past this, so a counter can't get in behind him. */
-const SUPPORT_MAX_X = PITCH.right - 320;
 
-/** The defender in possession: behind the ball for the pass back, between it and the middle. */
-const supportAngle = ({ ball }: Context): Plan =>
+/** The defender in possession: behind the ball for the pass back, between it and the middle, never so far up a counter gets in behind. */
+const supportAngle = ({ ball, tactics }: Context): Plan =>
   hold(
-    clamp(ball.x - SUPPORT_DEPTH, PITCH.left + 120, SUPPORT_MAX_X),
+    clamp(ball.x - SUPPORT_DEPTH, PITCH.left + 120, LINES[tactics.line].support),
     PITCH.centerY + (ball.y - PITCH.centerY) * SUPPORT_ANGLE,
   );
 
@@ -545,9 +582,16 @@ function bankAim(ctx: Context, target: Vec): Vec | null {
   return null;
 }
 
-/** On or going for the ball: shoot, pass, bank it, or dribble closer. */
-/** How long a bot keeps looking for a clear lane before shooting anyway. */
-const LANE_PATIENCE = 0.6;
+/**
+ * What the shooting tactic changes; `normal` holds the original values. range: multiplies the tier's
+ * shot range. passChance: how often an open pass is taken over a long shot. patience: seconds spent
+ * looking for a clear lane before shooting anyway.
+ */
+const SHOOTING = {
+  patient: { range: 0.8, passChance: 0.55, patience: 1 },
+  normal: { range: 1, passChance: 0.35, patience: 0.6 },
+  early: { range: 1.3, passChance: 0.15, patience: 0.25 },
+} as const satisfies Record<Tactics['shooting'], object>;
 /** An opponent this close to the ball means shoot now, or lose it. */
 const PRESSURE_DISTANCE = 55;
 
@@ -581,16 +625,18 @@ function laneOpening(ctx: Context): Vec | null {
   return best;
 }
 
+/** On or going for the ball: shoot, pass, bank it, or dribble closer. */
 function carry(ctx: Context): Plan {
   const { skill, ball, self } = ctx;
+  const shooting = SHOOTING[ctx.tactics.shooting];
   const shot = shotTarget(ctx);
-  const far = dist(ball, shot) > skill.shotRange;
+  const far = dist(ball, shot) > skill.shotRange * shooting.range;
   const onBall = ctx.ballDistance < self.radius + BALL.radius + 60;
   const shotBlocked = blocked(ctx, ball, shot);
 
   if (onBall && (shotBlocked || far)) {
     const pass = passTarget(ctx);
-    if (pass && (shotBlocked || ctx.state.rng.next() < 0.35)) return attack(ctx, pass, false);
+    if (pass && (shotBlocked || ctx.state.rng.next() < shooting.passChance)) return attack(ctx, pass, false);
     if (shotBlocked && skill.bankPasses && !far) {
       const bank = bankAim(ctx, shot);
       if (bank) return attack(ctx, bank, false);
@@ -599,7 +645,7 @@ function carry(ctx: Context): Plan {
       const now = ctx.state.phaseTime;
       ctx.memory.openingSince ??= now;
       const pressed = ctx.opponents.some((o) => dist(o, ball) < o.radius + PRESSURE_DISTANCE);
-      const opening = !pressed && now - ctx.memory.openingSince < LANE_PATIENCE ? laneOpening(ctx) : null;
+      const opening = !pressed && now - ctx.memory.openingSince < shooting.patience ? laneOpening(ctx) : null;
       if (opening) return attack(ctx, opening, true);
     }
   }
