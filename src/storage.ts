@@ -1,6 +1,7 @@
 import { DIFFICULTIES, TOP_TIER } from './ai/skills';
 import { normalizeLook, type Look } from './knight/look';
 import { normalizeCup, type CupState } from './modes/cup/bracket';
+import { normalizeSeason, type SeasonState } from './modes/manager/season';
 import { REALM_HOUSES } from './setup/houses';
 
 const LOOK_KEY = 'mobball.look.v2';
@@ -8,6 +9,7 @@ const SETTINGS_KEY = 'mobball.settings.v1';
 const MUTED_KEY = 'mobball.muted.v1';
 const CUP_KEY = 'mobball.cup.v1';
 const HONOURS_KEY = 'mobball.honours.v1';
+const SEASON_KEY = 'mobball.season.v1';
 
 export interface Preferences {
   houseId: string;
@@ -84,14 +86,27 @@ export const saveCup = (cup: CupState | null): void => {
 
 export interface Honours {
   cupWins: number;
+  leagueWins: number;
 }
+
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value > 0;
 
 export function loadHonours(): Honours {
   const raw = read(HONOURS_KEY);
-  const wins = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>).cupWins : 0;
-  return { cupWins: typeof wins === 'number' && Number.isInteger(wins) && wins > 0 ? wins : 0 };
+  const source = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  return {
+    cupWins: isCount(source.cupWins) ? source.cupWins : 0,
+    leagueWins: isCount(source.leagueWins) ? source.leagueWins : 0,
+  };
 }
 
 export const saveHonours = (honours: Honours): void => {
   write(HONOURS_KEY, honours);
+};
+
+/** The Manager mode season in progress or just finished, if any. */
+export const loadSeason = (): SeasonState | null => normalizeSeason(read(SEASON_KEY));
+export const saveSeason = (season: SeasonState | null): void => {
+  write(SEASON_KEY, season);
 };

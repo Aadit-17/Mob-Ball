@@ -1,5 +1,6 @@
 import { cup } from './cup';
 import { exhibition } from './exhibition';
+import { manager } from './manager';
 import type { GameMode } from './mode';
 
 const comingSoon = (id: string, name: string, blurb: string): GameMode => ({
@@ -15,5 +16,5 @@ export const MODES: readonly GameMode[] = [
   exhibition,
   cup,
   comingSoon('career', 'My Career', 'Take your knight from village team to royal squad.'),
-  comingSoon('manager', 'Manager', 'Run a house: draft knights, set line-ups, win the league.'),
+  manager,
 ];

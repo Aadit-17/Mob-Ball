@@ -57,6 +57,8 @@ export interface SeasonState {
   /** Stamina of every drafted knight, by house then squad id; empty until the league starts. */
   readonly stamina: Readonly<Record<string, Stamina>>;
   readonly plan: PlayerPlan | null;
+  /** Set once a finished season's title, if won, has been added to the player's honours. */
+  readonly titleCounted: boolean;
 }
 
 /** How the player's team sheet is first filled in, before they change anything. */
@@ -68,6 +70,7 @@ export function startSeason(seed: number, playerHouse: string, forged: Look): Se
     league: null,
     stamina: {},
     plan: null,
+    titleCounted: false,
   };
 }
 
@@ -298,7 +301,7 @@ export function normalizeSeason(raw: unknown): SeasonState | null {
   const source = raw as Record<string, unknown>;
   const draft = normalizeDraft(source.draft);
   if (!draft) return null;
-  if (!isDraftComplete(draft)) return { draft, league: null, stamina: {}, plan: null };
+  if (!isDraftComplete(draft)) return { draft, league: null, stamina: {}, plan: null, titleCounted: false };
 
   const league = normalizeLeague(source.league, DRAFT_HOUSES);
   if (league?.seed !== draft.seed || league.playerHouse !== draft.playerHouse) return null;
@@ -321,7 +324,8 @@ export function normalizeSeason(raw: unknown): SeasonState | null {
   if (!tactics || !Array.isArray(starters) || !starters.every((id): id is string => typeof id === 'string'))
     return null;
   try {
-    return setPlan({ draft, league, stamina, plan: null }, { starters, tactics });
+    const titleCounted = source.titleCounted === true;
+    return setPlan({ draft, league, stamina, plan: null, titleCounted }, { starters, tactics });
   } catch {
     return null;
   }

@@ -2,6 +2,7 @@ import { DIFFICULTIES, type Difficulty } from './ai/skills';
 import { createRng, randomSeed } from './game/rng';
 import type { Look } from './knight/look';
 import type { CupState } from './modes/cup/bracket';
+import type { SeasonState } from './modes/manager/season';
 import type { MatchSession } from './modes/mode';
 import { houseById, HOUSES, type House } from './setup/houses';
 import { createSquads, rollRivals, setTeamTier, withTier, type Squads } from './setup/squads';
@@ -10,20 +11,24 @@ import {
   loadHonours,
   loadLook,
   loadPreferences,
+  loadSeason,
   saveCup,
   saveHonours,
   saveLook,
   savePreferences,
+  saveSeason,
   type Honours,
   type Preferences,
 } from './storage';
 import { mountCup } from './ui/screens/cup';
+import { mountDraft } from './ui/screens/draft';
 import { mountForge } from './ui/screens/forge';
 import { mountHome } from './ui/screens/home';
+import { mountManager } from './ui/screens/manager';
 import { mountMatch } from './ui/screens/match';
 import { mountSetup } from './ui/screens/setup';
 
-export type ScreenId = 'home' | 'forge' | 'setup' | 'match' | 'cup';
+export type ScreenId = 'home' | 'forge' | 'setup' | 'match' | 'cup' | 'draft' | 'manager';
 
 /** What every screen can see and change. */
 export interface AppContext {
@@ -48,6 +53,10 @@ export interface AppContext {
   setCup(cup: CupState | null): void;
   readonly honours: Honours;
   addCupWin(): void;
+  /** The Manager mode season in progress or just finished; saved on every change. */
+  readonly season: SeasonState | null;
+  setSeason(season: SeasonState | null): void;
+  addLeagueWin(): void;
 }
 
 type Mount = (root: HTMLElement, app: AppContext) => () => void;
@@ -58,6 +67,8 @@ const SCREENS: Record<ScreenId, Mount> = {
   setup: mountSetup,
   match: mountMatch,
   cup: mountCup,
+  draft: mountDraft,
+  manager: mountManager,
 };
 
 export class App implements AppContext {
@@ -68,6 +79,7 @@ export class App implements AppContext {
   session: MatchSession | null = null;
   cup = loadCup();
   honours = loadHonours();
+  season = loadSeason();
   private unmount: (() => void) | null = null;
 
   constructor(private readonly root: HTMLElement) {
@@ -131,6 +143,16 @@ export class App implements AppContext {
 
   addCupWin(): void {
     this.honours = { ...this.honours, cupWins: this.honours.cupWins + 1 };
+    saveHonours(this.honours);
+  }
+
+  setSeason(season: SeasonState | null): void {
+    this.season = season;
+    saveSeason(season);
+  }
+
+  addLeagueWin(): void {
+    this.honours = { ...this.honours, leagueWins: this.honours.leagueWins + 1 };
     saveHonours(this.honours);
   }
 
