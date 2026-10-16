@@ -5,6 +5,7 @@ import type { KnightSpec } from '../../game/match';
 import type { MatchState, Role, TeamId } from '../../game/types';
 import { clamp } from '../../game/vec';
 import type { Manager, ManagerAction } from '../runner';
+import { KEEPER_BUILD_VALUE, KEEPER_TIER_VALUE, OUTFIELD_BUILD_VALUE, OUTFIELD_TIER_VALUE } from './draft';
 import { SQUAD_SIZE, STARTERS, type HouseStyle, type SquadKnight } from './types';
 
 export const STAMINA_MAX = 100;
@@ -167,7 +168,7 @@ export const CHARGE: Tactics = { press: 'high', shooting: 'early' };
 /** Seeing it out: sit deep, press only in our half, keep the ball until the chance is clear. */
 export const HOLD: Tactics = { press: 'low', shooting: 'patient' };
 
-/** The second-half point a rival makes his substitution, or half-time when behind. */
+/** The earliest a rival considers his substitution: this far into the second half, or half-time when behind. */
 export const SUB_AT = 2 / 3;
 export const CHASING_SUB_AT = 1 / 2;
 /** From here a rival behind charges and one ahead holds. */
@@ -217,13 +218,80 @@ export function rivalTactics(style: HouseStyle, gone: number, lead: number): Tac
 interface OnPitch {
   readonly id: number;
   readonly tier: number;
+  readonly build: number;
+  readonly role: Role;
   readonly stamina: number;
 }
 
-/** A substitution's worth in tiers: fresher legs for the rest of the match, plus the stamina the
- * starter saves, less what the bench knight spends instead of resting. */
-function subValue(off: OnPitch, on: BenchOption, left: number, weight: number): number {
-  const now = left * (strength(on.spec.tier, on.stamina) - strength(off.tier, off.stamina));
+/** One tier for one knight, in goals a match: the measured Peasant-to-Legend span over its four steps. */
+const GOALS_PER_TIER =
+  ((OUTFIELD_TIER_VALUE.at(-1) ?? 0) - (OUTFIELD_TIER_VALUE[0] ?? 0)) / (OUTFIELD_TIER_VALUE.length - 1);
+/** One standard error of each fitted tier or build value, in goals ('draft values' in scripts/draft.sim.ts). */
+const VALUE_SE = 0.06;
+
+/**
+ * A sub must still help at SUB_MARGIN_SE standard errors below its fitted gain. scripts/rivals.sim.ts, 12 real
+ * seasons: rivals sub in 67% of matches (61% within a goal at the hour, 88% with a fitted-better bench); v the
+ * same side with no subs -0.00 ± 0.04 pts, -0.03 ± 0.05 goals a match; v no manager +0.01 ± 0.05, -0.01 ± 0.06.
+ */
+export const SUB_MARGIN_SE = 1;
+/** Goals a side a match in rival league play (1.74 ± 0.07 measured), for the points a goal is worth. */
+export const LEAGUE_GOALS = 1.75;
+
+/** A knight's measured worth in a role, in tiers: tier and build values fitted in mixed line-ups, less what
+ * tiredness costs. Tiredness only slows a knight, and a keeper's speed (part of his tier) fits to nothing. */
+function worth(tier: number, build: number, role: Role, stamina: number): number {
+  if (role === 'gk')
+    return ((KEEPER_TIER_VALUE[tier] ?? 0) + (KEEPER_BUILD_VALUE[build] ?? 0)) / GOALS_PER_TIER;
+  return (
+    ((OUTFIELD_TIER_VALUE[tier] ?? 0) + (OUTFIELD_BUILD_VALUE[build] ?? 0)) / GOALS_PER_TIER -
+    tiredCost(stamina)
+  );
+}
+
+/** The uncertainty of a swap's measured gain, in tiers: one standard error for each fitted value that differs. */
+function swapNoise(off: OnPitch, on: KnightSpec): number {
+  const differing = Number(off.tier !== on.tier) + Number(off.build !== on.look.build);
+  return (VALUE_SE / GOALS_PER_TIER) * Math.sqrt(differing);
+}
+
+const poissonPmf = (rate: number, n: number): number[] => {
+  const pmf = [Math.exp(-rate)];
+  for (let k = 1; k <= n; k++) pmf.push(((pmf[k - 1] ?? 0) * rate) / k);
+  return pmf;
+};
+
+/** Enough goals that the Poisson tail left out is negligible at any rate this game reaches. */
+const MAX_GOALS = 30;
+
+/** The chance the rest of a match ends `diff` goals better for one of two equal sides, `rate` goals each. */
+function goalDiffChance(rate: number, diff: number): number {
+  const pmf = poissonPmf(rate, MAX_GOALS);
+  return pmf.reduce((sum, p, x) => sum + p * (pmf[x - diff] ?? 0), 0);
+}
+
+/**
+ * League points one more goal of difference is worth with `lead` and `left` of the match to go: half
+ * scored (from one behind it earns a draw, from level a win), half not conceded (from level it saves a
+ * draw, from one ahead a win). Late on, level is worth most and a settled match next to nothing.
+ */
+export function pointsPerGoal(lead: number, left: number): number {
+  const ends = (final: number): number => goalDiffChance(LEAGUE_GOALS * clamp(left, 0, 1), final - lead);
+  return 0.5 * ends(-1) + 1.5 * ends(0) + ends(1);
+}
+
+/** What strength now is worth next to the same strength in a future match, which starts level. */
+export const leverage = (lead: number, left: number): number =>
+  pointsPerGoal(lead, left) / pointsPerGoal(0, 1);
+
+/** A substitution's worth in tiers: the measured gain for the rest of the match (less its uncertainty),
+ * weighed by the game state, plus the stamina the starter saves, less what the bench knight spends. */
+function subValue(off: OnPitch, on: BenchOption, left: number, lead: number, weight: number): number {
+  const gain =
+    worth(on.spec.tier, on.spec.look.build, off.role, on.stamina) -
+    worth(off.tier, off.build, off.role, off.stamina) -
+    SUB_MARGIN_SE * swapNoise(off, on.spec);
+  const now = leverage(lead, left) * left * gain;
   const saved = tiredCost(off.stamina - PLAY_COST) - tiredCost(off.stamina - PLAY_COST * (1 - left));
   const spent = tiredCost(on.stamina - PLAY_COST * left) - tiredCost(on.stamina + REST_GAIN);
   return now + weight * (saved - spent);
@@ -240,12 +308,12 @@ export function createRivalManager(setup: RivalSetup): RivalManager {
   let tactics = setup.style.tactics;
 
   /** The pair worth the most, if any is worth making; earlier slots win ties. */
-  function bestSub(on: readonly OnPitch[], left: number): Omit<RivalSub, 'step'> | null {
+  function bestSub(on: readonly OnPitch[], left: number, lead: number): Omit<RivalSub, 'step'> | null {
     let best: Omit<RivalSub, 'step'> | null = null;
     let bestValue = 0;
     for (const [offSlot, off] of on.entries()) {
       for (const [benchSlot, option] of setup.bench.entries()) {
-        const value = subValue(off, option, left, weight);
+        const value = subValue(off, option, left, lead, weight);
         if (value > bestValue) [best, bestValue] = [{ offSlot, benchSlot }, value];
       }
     }
@@ -256,11 +324,17 @@ export function createRivalManager(setup: RivalSetup): RivalManager {
     const step = polls++ * POLL_STEPS;
     pitch ??= state.knights
       .filter((k) => k.team === team)
-      .map((k, i) => ({ id: k.id, tier: k.tier, stamina: setup.starters[i] ?? STAMINA_MAX }));
+      .map((k, i) => ({
+        id: k.id,
+        tier: k.tier,
+        build: k.look.build,
+        role: k.role,
+        stamina: setup.starters[i] ?? STAMINA_MAX,
+      }));
     const gone = clockGone(state);
     const lead = leadOf(state, team);
     if (!made && gone >= (lead < 0 ? CHASING_SUB_AT : SUB_AT)) {
-      const sub = bestSub(pitch, 1 - gone);
+      const sub = bestSub(pitch, 1 - gone, lead);
       const off = sub && pitch[sub.offSlot];
       const on = sub && setup.bench[sub.benchSlot];
       if (sub && off && on) {

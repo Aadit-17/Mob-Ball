@@ -16,8 +16,10 @@ import {
   freshStamina,
   HOLD,
   LATE,
+  leverage,
   PLAY_COST,
   playingShares,
+  pointsPerGoal,
   REST_GAIN,
   rivalTactics,
   squadKnightSpec,
@@ -427,24 +429,167 @@ describe('createRivalManager', () => {
         draws: true,
         managers: [home.manage, away.manage],
       });
-      let subStep: number | null = null;
+      const subSteps: [number | null, number | null] = [null, null];
       while (!runner.ended) {
-        const before = runner.state.substituted.filter((k) => k.team === 0).length;
+        const before = [0, 1].map((t) => runner.state.substituted.filter((k) => k.team === t).length);
         const step = runner.step;
         runner.advanceOne();
-        if (runner.state.substituted.filter((k) => k.team === 0).length > before) subStep = step;
+        for (const t of [0, 1] as const)
+          if (runner.state.substituted.filter((k) => k.team === t).length > (before[t] ?? 0))
+            subSteps[t] = step;
       }
       return {
-        reported: home.substitution()?.step,
-        subStep,
+        reported: [home.substitution(), away.substitution()],
+        subSteps,
         score: [...runner.state.score],
-        away: away.substitution(),
       };
     };
     const first = play();
-    expect(first.subStep).not.toBeNull();
-    expect(first.reported).toBe(first.subStep);
-    expect(first.away?.offSlot).toBe(3);
+    expect(first.subSteps[0]).not.toBeNull();
+    expect(first.reported[0]?.step).toBe(first.subSteps[0]);
+    expect(first.reported[1]?.offSlot).toBe(3);
     expect(play()).toEqual(first);
+  });
+
+  it('reports a tactical substitution at the step the runner made it, from a fresh line-up', () => {
+    const peasantUpFront = ROLES.map((role, i) =>
+      squadKnightSpec(knight(`s${String(i)}`, i === 3 ? 0 : 2), 100, role),
+    );
+    const legend = { spec: squadKnightSpec(knight('L', 4), 100, 'mid'), stamina: 100 };
+    const rival = createRivalManager({
+      style: balanced,
+      starters: [100, 100, 100, 100],
+      bench: [legend],
+      matchdaysLeft: 6,
+    });
+    const runner = new MatchRunner({
+      home: ROLES.map((role) => tier2(100, role)),
+      away: peasantUpFront,
+      seed: 11,
+      draws: true,
+      managers: [null, rival.manage],
+    });
+    let subStep: number | null = null;
+    while (!runner.ended) {
+      const step = runner.step;
+      runner.advanceOne();
+      if (subStep === null && runner.state.substituted.some((k) => k.team === 1)) subStep = step;
+    }
+    expect(subStep).not.toBeNull();
+    expect(rival.substitution()).toEqual({ offSlot: 3, benchSlot: 0, step: subStep });
+    expect(runner.state.substituted.map((k) => k.id)).toEqual([7]);
+  });
+});
+
+describe('tactical substitutions', () => {
+  const side = (tiers: readonly number[]): KnightSpec[] =>
+    ROLES.map((role, i) => squadKnightSpec(knight(`s${String(i)}`, tiers[i] ?? 2), 100, role));
+  const matchOf = (home: readonly KnightSpec[]): MatchState =>
+    createMatch({ home, away: side([2, 2, 2, 2]), seed: 3, draws: true });
+  /** A Legend rested because he is worn: worth bringing on only when the match is still in the balance. */
+  const tiredLegend = { spec: squadKnightSpec(knight('L', 4), 40, 'mid'), stamina: 40 };
+  const rivalWith = (bench: RivalSetup['bench']) =>
+    createRivalManager({ style: balanced, starters: [100, 100, 100, 100], bench, matchdaysLeft: 10 });
+
+  /** The manager's substitutions for team 0, polled once a second through `spans` of [from, to, score]. */
+  function subsOver(
+    rival: ReturnType<typeof createRivalManager>,
+    home: readonly KnightSpec[],
+    spans: readonly (readonly [number, number, readonly [number, number]])[],
+  ) {
+    const state = matchOf(home);
+    const subs: { at: number; action: ManagerAction }[] = [];
+    for (const [from, to, [us, them]] of spans) {
+      state.score[0] = us;
+      state.score[1] = them;
+      for (let t = from; t < to; t++) {
+        state.clock = MATCH.duration - t;
+        const action = rival.manage(state, 0);
+        if (action?.kind === 'substitution') subs.push({ at: t, action });
+      }
+    }
+    return subs;
+  }
+  const whole = (score: readonly [number, number]) => [[0, MATCH.duration, score]] as const;
+
+  it('brings a stronger knight on for its weakest outfield one when behind, from half-time', () => {
+    const home = side([2, 2, 2, 0]);
+    const rival = rivalWith([tiredLegend]);
+    const subs = subsOver(rival, home, whole([0, 1]));
+    expect(subs).toEqual([
+      {
+        at: MATCH.duration * CHASING_SUB_AT,
+        action: { kind: 'substitution', offId: 3, on: tiredLegend.spec },
+      },
+    ]);
+    expect(rival.substitution()).toEqual({
+      offSlot: 3,
+      benchSlot: 0,
+      step: MATCH.duration * CHASING_SUB_AT * 120,
+    });
+  });
+
+  it('protects a lead late by bringing the stronger knight on in defence', () => {
+    const home = side([2, 0, 2, 2]);
+    const subs = subsOver(rivalWith([tiredLegend]), home, whole([2, 1]));
+    expect(subs).toEqual([
+      {
+        at: Math.ceil(MATCH.duration * SUB_AT),
+        action: { kind: 'substitution', offId: 1, on: tiredLegend.spec },
+      },
+    ]);
+  });
+
+  it('spends a tired star’s stamina only while the match is in the balance, not once it is settled', () => {
+    const home = side([2, 2, 2, 0]);
+    expect(subsOver(rivalWith([tiredLegend]), home, whole([1, 1]))).toHaveLength(1);
+    expect(subsOver(rivalWith([tiredLegend]), home, whole([0, 3]))).toEqual([]);
+    expect(subsOver(rivalWith([tiredLegend]), home, whole([3, 0]))).toEqual([]);
+  });
+
+  it('never substitutes when the bench is no better, whatever the score', () => {
+    const equal = { spec: squadKnightSpec(knight('e'), 100, 'mid'), stamina: 100 };
+    const weaker = { spec: squadKnightSpec(knight('w', 1), 100, 'mid'), stamina: 100 };
+    for (const score of [
+      [0, 1],
+      [1, 1],
+      [2, 1],
+      [0, 3],
+    ] as const) {
+      const rival = rivalWith([equal, weaker]);
+      expect(subsOver(rival, side([2, 2, 2, 2]), whole(score))).toEqual([]);
+      expect(rival.substitution()).toBeNull();
+    }
+  });
+
+  it('makes one substitution at most, however the match turns', () => {
+    const fresh = (id: string) => ({ spec: squadKnightSpec(knight(id, 4), 100, 'mid'), stamina: 100 });
+    const rival = rivalWith([fresh('L1'), fresh('L2')]);
+    const subs = subsOver(rival, side([2, 0, 0, 2]), [
+      [0, 60, [0, 1]],
+      [60, 75, [1, 1]],
+      [75, MATCH.duration, [2, 1]],
+    ]);
+    expect(subs).toHaveLength(1);
+    expect(rival.substitution()?.offSlot).toBe(1);
+  });
+});
+
+describe('pointsPerGoal', () => {
+  it('is exact at full time: a goal from level is worth 1.5 points, from one behind 0.5, one ahead 1', () => {
+    expect(pointsPerGoal(0, 0)).toBeCloseTo(1.5, 12);
+    expect(pointsPerGoal(-1, 0)).toBeCloseTo(0.5, 12);
+    expect(pointsPerGoal(1, 0)).toBeCloseTo(1, 12);
+    expect(pointsPerGoal(2, 0)).toBe(0);
+  });
+
+  it('weighs a close match late above a future match and a settled one far below', () => {
+    expect(leverage(0, 1)).toBeCloseTo(1, 12);
+    const late = 1 / 3;
+    expect(leverage(0, late)).toBeGreaterThan(leverage(1, late));
+    expect(leverage(1, late)).toBeGreaterThan(leverage(-1, late));
+    expect(leverage(-1, late)).toBeGreaterThan(0.5);
+    expect(leverage(-3, late)).toBeLessThan(0.15);
+    expect(leverage(3, late)).toBeLessThan(0.15);
   });
 });
