@@ -49,6 +49,17 @@ function modeCard(mode: GameMode, app: AppContext): HTMLElement {
 
 const kbd = (key: string): HTMLElement => h('kbd', { text: key });
 
+/** "Realm Cup champion ×2" under the knight's name; nothing until the first one is won. */
+const honourTitle = (title: string, count: number): HTMLElement | null =>
+  count > 0
+    ? h(
+        'p',
+        { class: 'home-title' },
+        title,
+        count > 1 && h('span', { class: 'title-count', text: `×${count}` }),
+      )
+    : null;
+
 export function mountHome(root: HTMLElement, app: AppContext): () => void {
   // Home is always the first screen, so this covers every screen after it.
   sound.attach();
@@ -57,7 +68,7 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
     attrs: { 'aria-label': `${app.look.name}, your knight` },
   });
   const banners = HOUSES.map((house, i) => banner(house, BANNER_SWAY[i] ?? 0));
-  const wins = app.honours.cupWins;
+  const { cupWins, leagueWins } = app.honours;
   root.append(
     h(
       'section',
@@ -100,17 +111,19 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
             { class: 'plinth' },
             h('div', { class: 'plinth-shield' }),
             portrait,
-            wins > 0 && h('span', { class: 'trophy', attrs: { title: 'Realm Cup champion' } }, icon('cup')),
+            cupWins > 0 &&
+              h('span', { class: 'trophy', attrs: { title: 'Realm Cup champion' } }, icon('cup')),
+            leagueWins > 0 &&
+              h(
+                'span',
+                { class: 'trophy league', attrs: { title: 'Realm League champion' } },
+                icon('scroll'),
+              ),
           ),
           h('p', { class: 'home-name', text: app.look.name }),
           h('p', { class: 'home-house', text: `House ${app.house.name}` }),
-          wins > 0 &&
-            h(
-              'p',
-              { class: 'home-title' },
-              'Realm Cup champion',
-              wins > 1 && h('span', { class: 'title-count', text: `×${wins}` }),
-            ),
+          honourTitle('Realm Cup champion', cupWins),
+          honourTitle('Realm League champion', leagueWins),
           h('div', { class: 'stats' }, ...buildStatRows(app.look)),
           button('Forge your knight', () => {
             app.go('forge');

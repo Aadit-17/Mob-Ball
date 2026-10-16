@@ -23,7 +23,7 @@ import { SQUAD_SIZE, type SquadKnight } from '../../modes/manager/types';
 import { houseById, REALM_HOUSES, type House } from '../../setup/houses';
 import { choice } from '../choice';
 import { button, h } from '../dom';
-import { blockColour, crest } from '../heraldry';
+import { blockColour, crest, houseShield } from '../heraldry';
 import { reducedMotion } from '../motion';
 import { drawPortrait } from '../portrait';
 import { stars } from './setup';
@@ -52,10 +52,6 @@ const points = (n: number): string => `${n} ${n === 1 ? 'point' : 'points'}`;
 const youTag = (): HTMLElement => h('small', { class: 'you-tag', text: 'Your knight' });
 const starsOf = (tier: number): HTMLElement =>
   h('span', { class: 'stars', text: stars(tier), attrs: { 'aria-hidden': 'true' } });
-
-function houseShield(house: House): HTMLElement {
-  return h('span', { class: 'tie-shield', attrs: { style: `--c: ${house.colour}` } }, crest(house));
-}
 
 /** "2.5 a pick": what's left spread over the picks still to make. */
 function perPick(left: number, picks: number): string {

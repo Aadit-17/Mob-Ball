@@ -1,7 +1,8 @@
 /// <reference types="node" />
 /**
- * Browser smoke test: builds the game, serves it, plays a full match in headless Chromium, then
- * starts a Realm Cup. Fails on any console error or warning, and reports the JS heap along the way.
+ * Browser smoke test: builds the game, serves it, plays a full match in headless Chromium, starts a
+ * Realm Cup, then drafts and plays two Manager matchdays. Fails on any console error or warning, and
+ * reports the JS heap along the way.
  *
  *   npm run smoke                                   (first run: `npx playwright install chromium`)
  *   SMOKE_URL=https://mob-ball.pages.dev npx tsx scripts/smoke.ts   (check a deployed site instead)
@@ -95,6 +96,42 @@ async function playCup(page: Page): Promise<void> {
     await page.waitForTimeout(900);
     await shot(page, `cup-champion-${width}`);
   }
+}
+
+/** Drafts a squad, skips one matchday, watches the next with the dugout and Skip, then resumes from home. */
+async function playManager(page: Page): Promise<void> {
+  const card = page.locator('.mode', { hasText: 'Manager' });
+  await card.getByRole('button', { name: 'Play' }).click();
+  await page.getByRole('button', { name: /^Start the draft as/ }).click();
+  const skipReveal = page.getByRole('button', { name: 'Skip to my pick' });
+  if (await skipReveal.isVisible()) await skipReveal.click();
+  await page.getByRole('button', { name: 'Auto-pick the rest' }).click();
+  await shot(page, 'manager-draft-complete');
+  await page.getByRole('button', { name: 'To the season' }).click();
+
+  await page.getByRole('button', { name: 'Skip to the result' }).click();
+  await page.getByRole('button', { name: 'On to matchday 2' }).click({ timeout: 60_000 });
+  console.log(`manager matchday 1 skipped · heap ${await heapMb(page)} MB`);
+
+  await page.getByRole('button', { name: 'Watch the match' }).click();
+  await page.waitForSelector('canvas.pitch');
+  await page.getByRole('button', { name: '4×' }).click();
+  await page.waitForTimeout(1500);
+  await page.getByRole('button', { name: 'Pause (Esc)' }).click();
+  await page.getByRole('heading', { name: 'Dugout' }).waitFor();
+  await shot(page, 'manager-dugout', false);
+  await page.getByRole('button', { name: 'Hold!' }).click();
+  await page.getByRole('button', { name: 'Back to the match' }).click();
+  await page.getByRole('button', { name: 'Skip', exact: true }).click();
+  await page.getByRole('button', { name: 'Results across the realm' }).click();
+  await page.getByRole('button', { name: 'On to matchday 3' }).waitFor({ timeout: 60_000 });
+  console.log(`manager matchday 2 watched, dugout used, skipped · heap ${await heapMb(page)} MB`);
+
+  await page.goto(page.url());
+  const note = await card.locator('.mode-progress').textContent();
+  if (!note?.startsWith('Matchday 3 of 14'))
+    throw new Error(`Home does not offer the season in progress (shows ${note ?? 'nothing'})`);
+  console.log(`manager season resumed from home: ${note}`);
 }
 
 async function main(): Promise<void> {
@@ -208,6 +245,9 @@ async function main(): Promise<void> {
       await page.locator('.bracket').waitFor();
       await shot(page, 'cup-bracket-390');
     }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto(baseUrl);
+    await playManager(page);
   } finally {
     await browser.close();
     server?.httpServer.close();

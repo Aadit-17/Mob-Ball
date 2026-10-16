@@ -294,6 +294,11 @@ kbd {
     0 4px 0 var(--drop);
 }
 
+.trophy.league {
+  right: auto;
+  left: 0;
+}
+
 .trophy svg {
   width: 26px;
   height: 26px;
@@ -1153,13 +1158,13 @@ kbd {
 }
 
 .overlay-card:has(.dugout-presets) h3 {
-  margin: 16px 0 8px;
+  margin: 10px 0 6px;
   color: var(--gold-rim);
   font: 700 17px var(--font-head);
 }
 
 .overlay-card:has(.dugout-presets) .choice {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .overlay-card:has(.dugout-presets) .choice > b {
@@ -1170,6 +1175,66 @@ kbd {
   margin: 0 0 6px;
   color: var(--text);
   text-align: center;
+}
+
+.overlay-card:has(.dugout-presets) {
+  width: min(94%, 720px);
+}
+
+.sub-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.sub-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sub-col h4 {
+  margin: 0 0 2px;
+  color: var(--gold-rim);
+  font: 700 14px var(--font-head);
+}
+
+.sub-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--iron-fill);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px var(--iron);
+}
+
+.sub-pick b {
+  font: 700 14px/1.2 var(--font-body);
+}
+
+.sub-pick small {
+  color: var(--text-2);
+  font: 600 12px/1.2 var(--font-body);
+}
+
+.sub-pick:hover {
+  box-shadow: inset 0 0 0 2px var(--gold-rim);
+}
+
+.sub-pick[aria-pressed='true'] {
+  background: linear-gradient(var(--gold-hi), #e2ad46);
+  color: var(--on-gold);
+  box-shadow: inset 0 0 0 2px var(--gold-rim);
+}
+
+.sub-pick[aria-pressed='true'] small {
+  color: var(--on-gold);
 }
 
 .dugout-presets {
@@ -1931,6 +1996,10 @@ kbd {
 
   .dugout-presets {
     margin-left: 0;
+  }
+
+  .sub-cols {
+    grid-template-columns: 1fr;
   }
 
   .cards {

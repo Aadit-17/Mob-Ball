@@ -17,3 +17,6 @@ export const BOTH_DEFAULT: TeamTactics = [DEFAULT_TACTICS, DEFAULT_TACTICS];
 
 export const withTactics = (all: TeamTactics, team: TeamId, tactics: Tactics): TeamTactics =>
   team === 0 ? [tactics, all[1]] : [all[0], tactics];
+
+export const sameTactics = (a: Tactics, b: Tactics): boolean =>
+  a.press === b.press && a.shooting === b.shooting;

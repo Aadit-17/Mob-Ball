@@ -1,11 +1,11 @@
 import './manager.css';
 import type { AppContext } from '../../app';
 import { skillFor } from '../../ai/skills';
-import { DEFAULT_TACTICS, type Tactics } from '../../ai/tactics';
+import { DEFAULT_TACTICS, sameTactics, type Tactics } from '../../ai/tactics';
 import { BUILDS } from '../../game/constants';
 import { ROLES_BY_SIZE } from '../../game/formation';
 import { option } from '../../knight/catalog';
-import { managerSession, settleSeason, skipPlayerMatch, standing } from '../../modes/manager';
+import { managerSession, ordinal, settleSeason, skipPlayerMatch, standing } from '../../modes/manager';
 import { squadOf } from '../../modes/manager/draft';
 import {
   champion,
@@ -63,14 +63,6 @@ const TABLE_COLUMNS = [
   ['GD', 'Goal difference'],
   ['Pts', 'Points'],
 ] as const;
-
-const ordinal = (n: number): string => {
-  const teen = n % 100 >= 11 && n % 100 <= 13;
-  const suffix = teen ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
-  return `${n}${suffix}`;
-};
-
-const sameTactics = (a: Tactics, b: Tactics): boolean => a.press === b.press && a.shooting === b.shooting;
 
 const pts = (n: number): string => `${n} ${n === 1 ? 'point' : 'points'}`;
 

@@ -22,7 +22,7 @@ import { simulateMatch } from '../../modes/cup/simulate';
 import { houseById, HOUSES, REALM_HOUSES, type House } from '../../setup/houses';
 import { choice } from '../choice';
 import { button, h } from '../dom';
-import { banner, blockColour, crest, icon } from '../heraldry';
+import { banner, blockColour, houseShield, icon } from '../heraldry';
 import { lozengeBurst, reducedMotion, throughTheGates } from '../motion';
 import { drawPortrait } from '../portrait';
 import { ROLE_NAMES, stars } from './setup';
@@ -33,14 +33,6 @@ const STEPS_PER_FRAME = 1200;
 const RESULT_PACE_MS = 450;
 
 const ROUND_TITLES = ['Quarter-finals', 'Semi-finals', 'Final'] as const;
-
-function houseShield(house: House | null): HTMLElement {
-  return h(
-    'span',
-    { class: `tie-shield${house ? '' : ' is-empty'}`, attrs: house ? { style: `--c: ${house.colour}` } : {} },
-    house && crest(house),
-  );
-}
 
 function tieSide(cup: CupState, fixture: Fixture, side: 0 | 1): HTMLElement {
   const id = fixture.houses[side];

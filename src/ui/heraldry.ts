@@ -129,3 +129,12 @@ export type IconName = keyof typeof ICONS;
 
 export const icon = (name: IconName): SVGElement =>
   svg(`<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`);
+
+/** A small shield in the house's colour with its crest; an empty, dashed one for a house still to be decided. */
+export function houseShield(house: House | null): HTMLElement {
+  return h(
+    'span',
+    { class: `tie-shield${house ? '' : ' is-empty'}`, attrs: house ? { style: `--c: ${house.colour}` } : {} },
+    house && crest(house),
+  );
+}

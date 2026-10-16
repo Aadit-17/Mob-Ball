@@ -262,8 +262,24 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       planned = { ...tactics, ...next };
       showDugout(dugout);
     };
-    const named = (name: string): string =>
-      dugout.details[name] ? `${name} · ${dugout.details[name]}` : name;
+    const pickRow = (name: string, pressed: boolean, onPick: () => void): HTMLElement =>
+      h(
+        'button',
+        {
+          class: 'sub-pick',
+          attrs: { type: 'button', 'aria-pressed': String(pressed) },
+          on: { click: onPick },
+        },
+        h('b', { text: name }),
+        h('small', { text: dugout.details[name] ?? '' }),
+      );
+    const column = (title: string, rows: HTMLElement[]): HTMLElement =>
+      h(
+        'div',
+        { class: 'sub-col', attrs: { role: 'group', 'aria-label': title } },
+        h('h4', { text: title }),
+        ...rows,
+      );
     const starters = state.knights.filter((k) => k.team === 0);
     const subsLeft = runner.subsLeft(0) > 0 && !change;
     const makeChange = button('Make the change', () => {
@@ -278,25 +294,28 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     makeChange.disabled = takeOff === null || bringOn === null;
     const substitution = subsLeft
       ? [
-          choice(
-            'Take off',
-            starters.map((k) => ({ value: k.id, label: named(k.look.name) })),
-            takeOff ?? -1,
-            (id) => {
-              takeOff = id;
-              showDugout(dugout);
-            },
+          h(
+            'div',
+            { class: 'sub-cols' },
+            column(
+              'Take off',
+              starters.map((k) =>
+                pickRow(k.look.name, takeOff === k.id, () => {
+                  takeOff = k.id;
+                  showDugout(dugout);
+                }),
+              ),
+            ),
+            column(
+              'Bring on',
+              benchLeft.map((spec, i) =>
+                pickRow(spec.look.name, bringOn === i, () => {
+                  bringOn = i;
+                  showDugout(dugout);
+                }),
+              ),
+            ),
           ),
-          choice(
-            'Bring on',
-            benchLeft.map((spec, i) => ({ value: i, label: named(spec.look.name) })),
-            bringOn ?? -1,
-            (i) => {
-              bringOn = i;
-              showDugout(dugout);
-            },
-          ),
-          makeChange,
         ]
       : [h('p', { class: 'dugout-note', text: change || 'Your substitution is used.' })];
     const level = <T extends string>(label: string, value: T): { value: T; label: string } => ({
@@ -337,7 +356,12 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       ),
       h('h3', { text: subsLeft ? 'Substitution · 1 left' : 'Substitution' }),
       ...substitution,
-      h('div', { class: 'overlay-actions' }, button('Back to the match', togglePause, 'btn-primary')),
+      h(
+        'div',
+        { class: 'overlay-actions' },
+        subsLeft && makeChange,
+        button('Back to the match', togglePause, 'btn-primary'),
+      ),
     );
   }
   function setSpeed(next: (typeof SPEEDS)[number]): void {

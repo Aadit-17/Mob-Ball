@@ -1,5 +1,5 @@
 import { skillFor } from '../../ai/skills';
-import type { Tactics } from '../../ai/tactics';
+import { sameTactics, type Tactics } from '../../ai/tactics';
 import { MATCH, STEP } from '../../game/constants';
 import type { KnightSpec } from '../../game/match';
 import type { MatchState, Role, TeamId } from '../../game/types';
@@ -213,8 +213,6 @@ export function rivalTactics(style: HouseStyle, gone: number, lead: number): Tac
   if (gone < LATE || lead === 0) return style.tactics;
   return lead < 0 ? CHARGE : HOLD;
 }
-
-const sameTactics = (a: Tactics, b: Tactics): boolean => a.press === b.press && a.shooting === b.shooting;
 
 interface OnPitch {
   readonly id: number;

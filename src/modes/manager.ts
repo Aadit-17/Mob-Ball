@@ -11,15 +11,10 @@ import { MatchRunner } from './runner';
 import type { GameMode, MatchResult, MatchSession } from './mode';
 import { SQUAD_SIZE } from './manager/types';
 
-const ordinal = (n: number): string => {
-  const suffix =
-    n % 10 === 1 && n !== 11
-      ? 'st'
-      : n % 10 === 2 && n !== 12
-        ? 'nd'
-        : n % 10 === 3 && n !== 13
-          ? 'rd'
-          : 'th';
+/** "1st", "12th", "23rd". */
+export const ordinal = (n: number): string => {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
   return `${n}${suffix}`;
 };
 
