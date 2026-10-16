@@ -406,6 +406,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       goals,
       steps: runner.step,
       timeline: runner.timeline,
+      goalLog: runner.goals,
     };
     const [us, them] = result.score;
     const verdict = us > them ? 'Victory!' : us < them ? 'Defeat' : 'Draw';

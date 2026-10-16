@@ -3,7 +3,7 @@ import type { Tactics } from '../ai/tactics';
 import type { KnightSpec } from '../game/match';
 import type { TeamId } from '../game/types';
 import type { House } from '../setup/houses';
-import type { FixtureConfig, TimedAction } from './runner';
+import type { FixtureConfig, GoalLog, TimedAction } from './runner';
 
 export interface GoalRecord {
   readonly team: TeamId;
@@ -22,6 +22,8 @@ export interface MatchResult {
   readonly steps: number;
   /** Changes made from the dugout, with the step each took effect. */
   readonly timeline: readonly TimedAction[];
+  /** Every goal with the runner knight credited, for modes that keep scorers. */
+  readonly goalLog: readonly GoalLog[];
 }
 
 export interface Dugout {

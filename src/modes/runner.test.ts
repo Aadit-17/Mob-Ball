@@ -57,6 +57,16 @@ describe('MatchRunner', () => {
     expect(outcome(late)).not.toBe(outcome(live));
   });
 
+  it('logs every goal, even when the events are discarded, crediting a knight on the scoring side', () => {
+    const runner = new MatchRunner(config);
+    runner.advance(Infinity);
+    const [home, away] = runner.state.score;
+    expect(runner.goals).toHaveLength(home + away);
+    expect(runner.goals.filter((g) => g.team === 0)).toHaveLength(home);
+    for (const g of runner.goals.filter((g) => !g.ownGoal && g.scorerId !== null))
+      expect(runner.state.knights.find((k) => k.id === g.scorerId)?.team).toBe(g.team);
+  });
+
   it('allows one substitution per side: the sub keeps the role, the knight taken off keeps his record', () => {
     const runner = new MatchRunner(config);
     const off = runner.state.knights[2];

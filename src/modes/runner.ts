@@ -16,6 +16,14 @@ export interface TimedAction {
   readonly action: ManagerAction;
 }
 
+/** A goal as it happened: the runner knight credited (null if nobody touched it), and the step. */
+export interface GoalLog {
+  readonly team: TeamId;
+  readonly scorerId: number | null;
+  readonly ownGoal: boolean;
+  readonly step: number;
+}
+
 /** An AI manager: looks at the match once a second and may make a change. Must be deterministic. */
 export type Manager = (state: MatchState, team: TeamId) => ManagerAction | null;
 
@@ -44,6 +52,7 @@ export class MatchRunner {
   private readonly subs: [number, number] = [0, 0];
   private readonly pending: { team: TeamId; action: ManagerAction }[] = [];
   private readonly recorded: TimedAction[] = [];
+  private readonly scored: GoalLog[] = [];
   private readonly scheduled: readonly TimedAction[];
 
   constructor(
@@ -82,6 +91,11 @@ export class MatchRunner {
     return this.recorded;
   }
 
+  /** Every goal so far, kept even when the events themselves are discarded (as `advance` does). */
+  get goals(): readonly GoalLog[] {
+    return this.scored;
+  }
+
   act(team: TeamId, action: ManagerAction): void {
     this.pending.push({ team, action });
   }
@@ -101,6 +115,9 @@ export class MatchRunner {
     }
 
     stepMatch(this.state, (k) => human?.(k) ?? this.brain.input(this.state, k));
+    for (const e of this.state.events)
+      if (e.type === 'goal')
+        this.scored.push({ team: e.team, scorerId: e.scorerId, ownGoal: e.ownGoal, step: this.steps });
     this.steps++;
     if (this.state.goldenGoal && ++this.goldenSteps > GOLDEN_GOAL_LIMIT) {
       // Never seen in testing; settle it by lot so a season or bracket can always go on.
