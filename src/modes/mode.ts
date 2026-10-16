@@ -1,7 +1,9 @@
 import type { AppContext, ScreenId } from '../app';
+import type { TeamTactics } from '../ai/tactics';
 import type { KnightSpec } from '../game/match';
 import type { TeamId } from '../game/types';
 import type { House } from '../setup/houses';
+import type { Manager } from './runner';
 
 export interface GoalRecord {
   readonly team: TeamId;
@@ -35,6 +37,15 @@ export interface MatchSession {
   readonly awayHouse: House;
   /** Where "quit" from the pause menu goes. */
   readonly quitTo: ScreenId;
+  /** Set by modes whose matches must replay identically; otherwise a fresh seed, default tactics, golden goal. */
+  readonly fixture?: {
+    readonly seed: number;
+    readonly tactics?: TeamTactics;
+    readonly draws?: boolean;
+    readonly managers?: readonly [Manager | null, Manager | null];
+  };
+  /** Nobody on the pitch is the player's: the match is watched, with speed controls and a skip. */
+  readonly spectate?: boolean;
   /** Buttons on the full-time screen; this is where a mode records results and moves on. */
   resultActions(result: MatchResult): readonly ResultAction[];
 }

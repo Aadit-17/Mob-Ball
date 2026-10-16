@@ -1,13 +1,13 @@
 import type { AppContext } from '../../app';
-import { BotBrain } from '../../ai/brain';
 import { muteButton } from '../../audio/mute-button';
 import { sound } from '../../audio/sound';
 import { KNIGHT, MATCH, STEP } from '../../game/constants';
-import { createMatch, knightById, stepMatch } from '../../game/match';
+import { knightById } from '../../game/match';
 import { randomSeed } from '../../game/rng';
 import type { MatchEvent, MatchState, TeamId } from '../../game/types';
 import { Keyboard } from '../../input/keyboard';
 import type { GoalRecord, MatchResult, MatchSession } from '../../modes/mode';
+import { MatchRunner } from '../../modes/runner';
 import { Camera, VIEW } from '../../render/camera';
 import { Effects } from '../../render/effects';
 import { setupCanvas } from '../../render/paint';
@@ -21,6 +21,8 @@ import { lozengeBurst, reducedMotion } from '../motion';
 const SLOW_MOTION = { seconds: 0.6, scale: 0.25 } as const;
 /** Never simulate more than this much time in one frame, e.g. after the tab was hidden. */
 const MAX_FRAME = 0.05;
+/** Speeds a watched match can run at; the simulation still advances in fixed steps, so the match is the same. */
+const SPEEDS = [1, 2, 4] as const;
 
 /** Maps match time onto a football clock: a full match reads as 90 minutes. */
 const footballMinute = (elapsed: number, duration: number, golden: boolean): string =>
@@ -44,10 +46,19 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   const { homeHouse, awayHouse } = session;
   // Assigned once the overlay exists; the HUD's pause button only calls it on click.
   let togglePause = (): void => undefined;
-  const state: MatchState = createMatch({ home: session.home, away: session.away, seed: randomSeed() });
+  const { fixture } = session;
+  const runner = new MatchRunner({
+    home: session.home,
+    away: session.away,
+    seed: fixture?.seed ?? randomSeed(),
+    ...(fixture?.tactics ? { tactics: fixture.tactics } : {}),
+    ...(fixture?.draws ? { draws: true } : {}),
+    ...(fixture?.managers ? { managers: fixture.managers } : {}),
+  });
+  const state: MatchState = runner.state;
   const duration = state.clock;
   const human = state.knights.find((k) => k.human);
-  const brain = new BotBrain();
+  let speed: (typeof SPEEDS)[number] = 1;
   const camera = new Camera();
   const effects = new Effects();
   const goals: GoalRecord[] = [];
@@ -69,6 +80,37 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   mute.addEventListener('click', () => {
     mute.blur();
   });
+  const speedButtons = SPEEDS.map((s) =>
+    h('button', {
+      class: s === speed ? 'speed on' : 'speed',
+      text: `${s}×`,
+      attrs: { type: 'button', 'aria-pressed': String(s === speed), title: `Watch at ${s}× speed` },
+      on: {
+        click: (e) => {
+          (e.currentTarget as HTMLButtonElement).blur();
+          setSpeed(s);
+        },
+      },
+    }),
+  );
+  const watchControls = session.spectate
+    ? h(
+        'div',
+        { class: 'watch' },
+        ...speedButtons,
+        h('button', {
+          class: 'speed skip',
+          text: 'Skip',
+          attrs: { type: 'button', title: 'Skip to full time' },
+          on: {
+            click: (e) => {
+              (e.currentTarget as HTMLButtonElement).blur();
+              skipToEnd();
+            },
+          },
+        }),
+      )
+    : null;
 
   root.append(
     h(
@@ -87,7 +129,8 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           { class: 'hud' },
           h('div', { class: 'board' }, blocks[0], score, blocks[1], clock),
           message,
-          h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' })),
+          ...(human ? [h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' }))] : []),
+          ...(watchControls ? [watchControls] : []),
           mute,
           h(
             'button',
@@ -108,7 +151,9 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       ),
       h('p', {
         class: 'hint',
-        text: 'WASD / arrows run · Space kick (hold to kick on contact) · Shift or E barge · Esc pause · M mute',
+        text: human
+          ? 'WASD / arrows run · Space kick (hold to kick on contact) · Shift or E barge · Esc pause · M mute'
+          : '1 / 2 / 3 speed · Esc pause · M mute',
       }),
     ),
   );
@@ -123,20 +168,26 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   const big = (text: string): string => `<span class="big">${text}</span>`;
   const escape = (text: string): string => text.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
 
+  /** Records a goal for the results screen and returns the scorer's display name. */
+  const recordGoal = (event: Extract<MatchEvent, { type: 'goal' }>): string => {
+    const scorer = knightById(state, event.scorerId);
+    const name = scorer ? (scorer.human ? 'You' : scorer.look.name) : 'The mob';
+    goals.push({
+      team: event.team,
+      scorer: name,
+      byPlayer: scorer?.human ?? false,
+      ownGoal: event.ownGoal,
+      minute: footballMinute(duration - state.clock, duration, state.goldenGoal),
+    });
+    return name;
+  };
+
   const onEvent = (event: MatchEvent): void => {
     effects.handle(event);
     sound.handle(event);
     if (event.type === 'goal') {
+      const name = recordGoal(event);
       const scorer = knightById(state, event.scorerId);
-      const minute = footballMinute(duration - state.clock, duration, state.goldenGoal);
-      const name = scorer ? (scorer.human ? 'You' : scorer.look.name) : 'The mob';
-      goals.push({
-        team: event.team,
-        scorer: name,
-        byPlayer: scorer?.human ?? false,
-        ownGoal: event.ownGoal,
-        minute,
-      });
       const line = event.ownGoal
         ? `OWN GOAL BY ${name.toUpperCase()}`
         : scorer?.human
@@ -144,6 +195,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           : `${name.toUpperCase()} SCORES!`;
       say(`${big('GOAL!')}<div class="msg-line">${escape(line)}</div>`, 2.2);
       celebrate(event.team);
+    } else if (event.type === 'substitution') {
+      const on = knightById(state, event.onId)?.look.name ?? '';
+      const off = knightById(state, event.offId)?.look.name ?? '';
+      say(`${big('CHANGE')}<div class="msg-line">${escape(`${on} on, ${off} off`.toUpperCase())}</div>`, 2.2);
     } else if (event.type === 'golden-goal') {
       say(`${big('GOLDEN GOAL')}<div class="msg-line">NEXT GOAL WINS</div>`, 1.8);
     } else if (event.type === 'full-time') {
@@ -191,9 +246,34 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       );
     } else overlay.hidden = true;
   };
+  function setSpeed(next: (typeof SPEEDS)[number]): void {
+    speed = next;
+    speedButtons.forEach((b, i) => {
+      const on = SPEEDS[i] === next;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+  }
+
+  /** Plays the rest of the match without drawing it: the same steps the screen would have run. */
+  function skipToEnd(): void {
+    if (state.phase === 'ended') return;
+    paused = false;
+    while (!runner.ended) {
+      runner.advanceOne();
+      const events = state.events;
+      state.events = [];
+      for (const event of events) if (event.type === 'goal') recordGoal(event);
+    }
+    sound.play('full-time');
+    showResults();
+  }
+
   const keyboard = new Keyboard((key) => {
     if (key === 'Escape' || key === 'p') togglePause();
     else if (key === 'm') mute.click();
+    else if (session.spectate && (key === '1' || key === '2' || key === '3'))
+      setSpeed(SPEEDS[Number(key) - 1] ?? 1);
   });
 
   function showOverlay(...children: HTMLElement[]): void {
@@ -250,10 +330,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     if (!paused) {
       elapsed += dt;
       const slow = state.phase === 'goal' && state.phaseTime < SLOW_MOTION.seconds;
-      accumulator += dt * (slow ? SLOW_MOTION.scale : 1);
-      while (accumulator >= STEP) {
+      accumulator += dt * (slow ? SLOW_MOTION.scale : speed);
+      while (accumulator >= STEP && !runner.ended) {
         accumulator -= STEP;
-        stepMatch(state, (k) => (k.human ? keyboard.input() : brain.input(state, k)));
+        runner.advanceOne((k) => (k.human ? keyboard.input() : null));
         const events = state.events;
         state.events = [];
         for (const event of events) onEvent(event);

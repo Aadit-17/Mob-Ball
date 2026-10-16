@@ -1075,6 +1075,43 @@ kbd {
   right: 12px;
 }
 
+/* Watched matches: speed and skip, where the barge ring sits when the player is on the pitch. */
+.watch {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.speed {
+  min-width: 44px;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(15, 13, 18, 0.82);
+  color: var(--text);
+  font: 800 14px var(--font-hud);
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px var(--gold-rim);
+}
+
+.speed:hover {
+  color: #fff;
+}
+
+.speed.on {
+  background: var(--gold);
+  color: #2a1d08;
+}
+
+.speed.skip {
+  margin-left: 6px;
+}
+
 .match > .hint {
   margin: 18px 0 0;
   text-align: center;
