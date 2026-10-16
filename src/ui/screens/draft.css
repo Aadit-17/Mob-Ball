@@ -1,0 +1,724 @@
+/* ---------- manager draft ---------- */
+.draft-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+
+.draft-screen .hint {
+  margin: 0 2px;
+}
+
+.draft-panel {
+  padding: 14px 16px 16px;
+}
+
+.draft-panel h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--text-2);
+  font-size: 16px;
+}
+
+.draft-count {
+  color: var(--text-2);
+  font: 600 15px/1.2 var(--font-body);
+}
+
+/* Setup: the eight houses as shields to choose from. */
+.house-picks {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.house-pick {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 14px 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #332e38, #25222a);
+  color: var(--text);
+  font: 700 17px/1.2 var(--font-head);
+  cursor: pointer;
+  box-shadow:
+    inset 0 0 0 2px var(--iron),
+    0 3px 0 var(--drop);
+  transition:
+    transform 0.2s var(--ease-out),
+    box-shadow 0.2s;
+}
+
+.house-pick:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    inset 0 0 0 2px var(--gold),
+    0 5px 0 var(--drop);
+}
+
+.house-pick[aria-pressed='true'] {
+  background:
+    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(242, 193, 78, 0.28), transparent 70%),
+    linear-gradient(180deg, #3a3340, #2a252e);
+  color: var(--gold-text);
+  box-shadow:
+    inset 0 0 0 3px var(--gold),
+    0 3px 0 var(--drop);
+}
+
+.house-pick[aria-pressed='true'] .house-pick-name::before {
+  content: '◆ ';
+  font-size: 12px;
+}
+
+.house-pick .tie-shield {
+  width: 46px;
+  height: 54px;
+  padding-bottom: 8px;
+}
+
+.house-pick .tie-shield .crest {
+  width: 26px;
+  height: 26px;
+}
+
+.draft-costs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-costs li {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: var(--well);
+  text-align: center;
+  box-shadow: inset 0 0 0 1px rgba(156, 132, 96, 0.5);
+}
+
+.draft-costs b {
+  color: #fff3d6;
+  font: 700 16px/1.2 var(--font-hud);
+}
+
+.draft-costs small {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.draft-screen .stars {
+  color: var(--gold-text);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.draft-setup .setup-actions {
+  margin-top: 4px;
+}
+
+/* The clock: whose pick it is, the latest pick, and this round's order. */
+.draft-clock {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 0 16px 16px;
+  text-align: center;
+}
+
+.draft-clock .ribbon {
+  min-width: min(100%, 280px);
+}
+
+.draft-status {
+  margin: 0;
+  color: #fff3d6;
+  font-size: 22px;
+}
+
+.draft-status:focus {
+  outline: none;
+}
+
+.draft-status.is-yours {
+  color: var(--gold-text);
+}
+
+.latest-pick {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 8px;
+  min-height: 28px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 16px;
+}
+
+.latest-pick span {
+  white-space: nowrap;
+}
+
+.latest-pick b {
+  color: #fff3d6;
+}
+
+.latest-pick.is-fresh {
+  animation: result-in 0.6s var(--ease-out);
+}
+
+.draft-order {
+  display: grid;
+  grid-template-columns: repeat(var(--n, 8), minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.order-slot {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 3px;
+  min-width: 0;
+  padding: 6px 4px 8px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #332e38, #25222a);
+  line-height: 1.15;
+  box-shadow: inset 0 0 0 2px rgba(156, 132, 96, 0.55);
+}
+
+.order-num {
+  color: var(--text-2);
+  font: 700 13px/1 var(--font-hud);
+  letter-spacing: 0.5px;
+}
+
+.order-slot b {
+  max-width: 100%;
+  overflow: hidden;
+  color: #fff3d6;
+  font: 700 15px/1.15 var(--font-hud);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-slot small {
+  max-width: 100%;
+  min-height: 1.2em;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-slot.is-done {
+  opacity: 0.75;
+}
+
+.order-slot.is-you {
+  box-shadow: inset 0 0 0 2px var(--gold-lo);
+}
+
+.order-slot.is-you b {
+  color: var(--gold-text);
+}
+
+.order-slot.is-now {
+  opacity: 1;
+  background:
+    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(242, 193, 78, 0.28), transparent 70%),
+    linear-gradient(180deg, #3a3340, #2a252e);
+  box-shadow: inset 0 0 0 2px var(--gold);
+  animation: beckon 1.6s ease-in-out infinite alternate;
+}
+
+.order-slot.is-now small {
+  color: var(--gold-text);
+  font-weight: 700;
+}
+
+.order-slot.is-fresh {
+  animation: result-in 0.6s var(--ease-out);
+}
+
+.order-dir {
+  margin: -2px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.draft-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+/* The board: the pool beside your squad and the rival houses. */
+.draft-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-areas:
+    'pool squad'
+    'pool rivals';
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.draft-board .draft-pool {
+  grid-area: pool;
+}
+
+.draft-board .draft-squad {
+  grid-area: squad;
+}
+
+.draft-board .draft-rivals {
+  grid-area: rivals;
+}
+
+.draft-filters {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(156, 132, 96, 0.4);
+}
+
+.draft-filters .choice {
+  gap: 6px;
+}
+
+.draft-filters .choice > b {
+  width: 64px;
+  font-size: 14px;
+}
+
+.draft-filters .chip {
+  padding: 6px 11px;
+  font-size: 14px;
+}
+
+.pool-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+
+.draft-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #332e38, #25222a);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.2;
+  text-align: center;
+  box-shadow: inset 0 0 0 2px var(--iron);
+}
+
+button.draft-card {
+  cursor: pointer;
+  transition:
+    transform 0.2s var(--ease-out),
+    box-shadow 0.2s;
+}
+
+button.draft-card[aria-disabled='false']:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 0 0 2px var(--gold),
+    0 5px 0 var(--drop);
+}
+
+button.draft-card[aria-disabled='true'] {
+  cursor: default;
+}
+
+.draft-card canvas {
+  display: block;
+  width: 100%;
+  max-width: 110px;
+  aspect-ratio: 110 / 128;
+  background: radial-gradient(ellipse 55% 22% at 50% 92%, rgba(255, 176, 72, 0.2), transparent 70%);
+}
+
+.draft-card b {
+  color: #fff3d6;
+  font: 700 17px/1.15 var(--font-hud);
+  letter-spacing: 0.3px;
+}
+
+.draft-card small {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.draft-card .tier {
+  color: var(--gold-text);
+  font: 700 14px/1.15 var(--font-hud);
+  letter-spacing: 0.3px;
+}
+
+.draft-card .stars {
+  margin-right: 4px;
+}
+
+.draft-card.is-forged {
+  background:
+    radial-gradient(ellipse 90% 50% at 50% 0%, rgba(242, 193, 78, 0.2), transparent 70%),
+    linear-gradient(180deg, #3a3340, #2a252e);
+  box-shadow: inset 0 0 0 2px var(--gold);
+}
+
+.draft-card .you-tag {
+  margin: 2px 0 1px;
+  color: var(--on-gold);
+  font: 800 12px/1.5 var(--font-hud);
+}
+
+.cost {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  padding: 3px 5px 2px;
+  border-radius: 999px;
+  background: var(--well);
+  color: var(--gold-text);
+  font: 800 16px/1 var(--font-hud);
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1.5px var(--gold-lo);
+}
+
+.cost small {
+  color: var(--text-2);
+  font: 700 10px/1 var(--font-hud);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.draft-card.is-blocked {
+  background: linear-gradient(180deg, #29252d, #201d24);
+  box-shadow: inset 0 0 0 2px rgba(156, 132, 96, 0.4);
+}
+
+.draft-card.is-blocked canvas,
+.draft-card.is-blocked .cost {
+  opacity: 0.45;
+  filter: grayscale(0.8);
+}
+
+.draft-card.is-blocked b,
+.draft-card.is-blocked .tier {
+  color: var(--text-2);
+}
+
+.why {
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(156, 132, 96, 0.35);
+  color: #e8b9a0;
+  font: italic 500 13px/1.25 var(--font-body);
+}
+
+/* While the rival houses pick, the pool waits without shouting why. */
+.pool-cards.is-waiting .draft-card {
+  opacity: 0.7;
+}
+
+/* Your squad and budget. */
+.budget {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.budget p {
+  margin: 0;
+}
+
+.budget b {
+  color: #fff3d6;
+}
+
+.budget .statbar {
+  height: 11px;
+}
+
+.draft-slots {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draft-slot {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 3px 10px 3px 4px;
+  border-radius: 8px;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px rgba(156, 132, 96, 0.5);
+}
+
+.draft-slot canvas {
+  width: 40px;
+  height: 46px;
+}
+
+.draft-slot b {
+  display: block;
+  overflow: hidden;
+  color: #fff3d6;
+  font: 700 16px/1.15 var(--font-hud);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-slot small {
+  display: block;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.draft-slot .slot-cost {
+  color: var(--gold-text);
+  font: 800 16px/1 var(--font-hud);
+}
+
+.draft-slot.is-empty {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 40px;
+  background: none;
+  color: var(--text-2);
+  font: italic 500 14px/1.2 var(--font-body);
+  box-shadow: inset 0 0 0 1px rgba(156, 132, 96, 0.35);
+  padding-left: 12px;
+}
+
+/* Rival houses: one folding list each. */
+.rival-list {
+  display: grid;
+  gap: 6px;
+}
+
+.rival {
+  border-radius: 8px;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px rgba(156, 132, 96, 0.5);
+}
+
+.rival summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: #fff3d6;
+  font: 700 16px/1.2 var(--font-hud);
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.rival summary::-webkit-details-marker {
+  display: none;
+}
+
+.rival summary::after {
+  content: '▸';
+  color: var(--gold);
+  font-size: 13px;
+  transition: transform 0.2s var(--ease-out);
+}
+
+.rival[open] summary::after {
+  transform: rotate(90deg);
+}
+
+.rival-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rival-count {
+  color: var(--text-2);
+  font: 600 13px/1.2 var(--font-body);
+  white-space: nowrap;
+}
+
+.rival ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 2px 10px 10px;
+  list-style: none;
+}
+
+.rival li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(156, 132, 96, 0.25);
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.rival li b {
+  color: var(--text);
+  font: 700 15px/1.2 var(--font-hud);
+}
+
+.rival li.is-empty {
+  font-style: italic;
+}
+
+/* Draft complete. */
+.draft-done {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 0 20px 22px;
+  text-align: center;
+}
+
+.draft-done .ribbon {
+  min-width: min(100%, 320px);
+}
+
+.draft-done .cards {
+  width: min(100%, 860px);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.draft-done-note {
+  max-width: 620px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 16px;
+}
+
+.draft-rivals.is-wide .rival-list {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .draft-board {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'squad'
+      'pool'
+      'rivals';
+    grid-template-rows: none;
+  }
+
+  .draft-order {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .draft-done .cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .house-picks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .draft-costs {
+    gap: 4px;
+  }
+
+  .draft-costs .stars {
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+
+  .house-pick {
+    padding: 10px 6px;
+    font-size: 16px;
+  }
+
+  .house-pick .tie-shield {
+    width: 36px;
+    height: 43px;
+    padding-bottom: 6px;
+  }
+
+  .house-pick .tie-shield .crest {
+    width: 20px;
+    height: 20px;
+  }
+
+  .draft-costs b {
+    font-size: 14px;
+  }
+
+  .draft-costs small {
+    font-size: 12px;
+  }
+
+  .draft-panel {
+    padding: 12px;
+  }
+
+  .draft-filters .choice > b {
+    width: 100%;
+  }
+
+  .pool-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .draft-status {
+    font-size: 19px;
+  }
+
+  .draft-done {
+    padding: 0 12px 18px;
+  }
+
+  .draft-done .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
