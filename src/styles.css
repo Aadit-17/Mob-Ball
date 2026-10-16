@@ -1145,6 +1145,45 @@ kbd {
   margin: 0 auto 14px;
 }
 
+/* The dugout: a taller card of choice rows, scrolling if the screen is short. */
+.overlay-card:has(.dugout-presets) {
+  max-height: 92%;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.overlay-card:has(.dugout-presets) h3 {
+  margin: 16px 0 8px;
+  color: var(--gold-rim);
+  font: 700 17px var(--font-head);
+}
+
+.overlay-card:has(.dugout-presets) .choice {
+  margin-bottom: 8px;
+}
+
+.overlay-card:has(.dugout-presets) .choice > b {
+  width: 96px;
+}
+
+.dugout-note {
+  margin: 0 0 6px;
+  color: var(--text);
+  text-align: center;
+}
+
+.dugout-presets {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 0 104px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .verdict {
   margin: 0 0 8px;
   background: var(--metal);
@@ -1884,6 +1923,14 @@ kbd {
 
   .choice > b {
     width: 100%;
+  }
+
+  .overlay-card:has(.dugout-presets) .choice > b {
+    width: 100%;
+  }
+
+  .dugout-presets {
+    margin-left: 0;
   }
 
   .cards {

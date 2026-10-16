@@ -1,5 +1,5 @@
 import type { AppContext, ScreenId } from '../app';
-import type { TeamTactics } from '../ai/tactics';
+import type { Tactics, TeamTactics } from '../ai/tactics';
 import type { KnightSpec } from '../game/match';
 import type { TeamId } from '../game/types';
 import type { House } from '../setup/houses';
@@ -18,6 +18,13 @@ export interface GoalRecord {
 export interface MatchResult {
   readonly score: readonly [number, number];
   readonly goals: readonly GoalRecord[];
+}
+
+export interface Dugout {
+  readonly bench: readonly KnightSpec[];
+  /** One-line summaries keyed by knight name, e.g. "Champion · Hefty · stamina 84". */
+  readonly details: Readonly<Record<string, string>>;
+  readonly presets: readonly { readonly label: string; readonly tactics: Tactics }[];
 }
 
 export interface ResultAction {
@@ -46,6 +53,8 @@ export interface MatchSession {
   };
   /** Nobody on the pitch is the player's: the match is watched, with speed controls and a skip. */
   readonly spectate?: boolean;
+  /** The home manager's options when a watched match is paused: substitutes and one-tap tactics. */
+  readonly dugout?: Dugout;
   /** Buttons on the full-time screen; this is where a mode records results and moves on. */
   resultActions(result: MatchResult): readonly ResultAction[];
 }

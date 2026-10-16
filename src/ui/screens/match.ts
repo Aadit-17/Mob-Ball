@@ -6,13 +6,15 @@ import { knightById } from '../../game/match';
 import { randomSeed } from '../../game/rng';
 import type { MatchEvent, MatchState, TeamId } from '../../game/types';
 import { Keyboard } from '../../input/keyboard';
-import type { GoalRecord, MatchResult, MatchSession } from '../../modes/mode';
+import type { Tactics } from '../../ai/tactics';
+import type { Dugout, GoalRecord, MatchResult, MatchSession } from '../../modes/mode';
 import { MatchRunner } from '../../modes/runner';
 import { Camera, VIEW } from '../../render/camera';
 import { Effects } from '../../render/effects';
 import { setupCanvas } from '../../render/paint';
 import { MatchRenderer } from '../../render/renderer';
 import type { House } from '../../setup/houses';
+import { choice } from '../choice';
 import { button, h } from '../dom';
 import { blockColour, crest, icon } from '../heraldry';
 import { lozengeBurst, reducedMotion } from '../motion';
@@ -229,7 +231,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   togglePause = (): void => {
     if (state.phase === 'ended') return;
     paused = !paused;
-    if (paused) {
+    if (paused && session.dugout) {
+      planned = runner.tacticsOf(0);
+      showDugout(session.dugout);
+    } else if (paused) {
       showOverlay(
         h('h2', { class: 'ribbon', text: 'Paused' }),
         h(
@@ -244,8 +249,111 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           }),
         ),
       );
-    } else overlay.hidden = true;
+    } else {
+      if (planned && planned !== runner.tacticsOf(0)) runner.act(0, { kind: 'tactics', tactics: planned });
+      overlay.hidden = true;
+    }
   };
+
+  // The dugout: changes are planned while paused and sent to the pitch on Continue.
+  const benchLeft = [...(session.dugout?.bench ?? [])];
+  let planned: Tactics | null = null;
+  let takeOff: number | null = null;
+  let bringOn: number | null = null;
+  let change = '';
+
+  function showDugout(dugout: Dugout): void {
+    const tactics = planned ?? runner.tacticsOf(0);
+    const plan = (next: Partial<Tactics>): void => {
+      planned = { ...tactics, ...next };
+      showDugout(dugout);
+    };
+    const named = (name: string): string =>
+      dugout.details[name] ? `${name} · ${dugout.details[name]}` : name;
+    const starters = state.knights.filter((k) => k.team === 0);
+    const subsLeft = runner.subsLeft(0) > 0 && !change;
+    const makeChange = button('Make the change', () => {
+      const on = bringOn === null ? undefined : benchLeft[bringOn];
+      const off = starters.find((k) => k.id === takeOff);
+      if (!on || !off) return;
+      runner.act(0, { kind: 'substitution', offId: off.id, on });
+      benchLeft.splice(bringOn ?? 0, 1);
+      change = `${on.look.name} comes on for ${off.look.name}.`;
+      showDugout(dugout);
+    });
+    makeChange.disabled = takeOff === null || bringOn === null;
+    const substitution = subsLeft
+      ? [
+          choice(
+            'Take off',
+            starters.map((k) => ({ value: k.id, label: named(k.look.name) })),
+            takeOff ?? -1,
+            (id) => {
+              takeOff = id;
+              showDugout(dugout);
+            },
+          ),
+          choice(
+            'Bring on',
+            benchLeft.map((spec, i) => ({ value: i, label: named(spec.look.name) })),
+            bringOn ?? -1,
+            (i) => {
+              bringOn = i;
+              showDugout(dugout);
+            },
+          ),
+          makeChange,
+        ]
+      : [h('p', { class: 'dugout-note', text: change || 'Your substitution is used.' })];
+    const level = <T extends string>(label: string, value: T): { value: T; label: string } => ({
+      value,
+      label,
+    });
+    showOverlay(
+      h('h2', { class: 'ribbon', text: 'Dugout' }),
+      h('p', {
+        class: 'dugout-note',
+        text: `${footballMinute(duration - state.clock, duration, state.goldenGoal)}′ · ${homeHouse.name} ${state.score[0]} – ${state.score[1]} ${awayHouse.name}`,
+      }),
+      h('h3', { text: 'Tactics' }),
+      choice(
+        'Press',
+        [level('Low', 'low'), level('Mid', 'mid'), level('High', 'high')],
+        tactics.press,
+        (v) => {
+          plan({ press: v });
+        },
+      ),
+      choice(
+        'Line',
+        [level('Deep', 'deep'), level('Normal', 'normal'), level('High', 'high')],
+        tactics.line,
+        (v) => {
+          plan({ line: v });
+        },
+      ),
+      choice(
+        'Shooting',
+        [level('Patient', 'patient'), level('Normal', 'normal'), level('Early', 'early')],
+        tactics.shooting,
+        (v) => {
+          plan({ shooting: v });
+        },
+      ),
+      h(
+        'div',
+        { class: 'dugout-presets' },
+        ...dugout.presets.map((p) =>
+          button(p.label, () => {
+            plan(p.tactics);
+          }),
+        ),
+      ),
+      h('h3', { text: subsLeft ? 'Substitution · 1 left' : 'Substitution' }),
+      ...substitution,
+      h('div', { class: 'overlay-actions' }, button('Back to the match', togglePause, 'btn-primary')),
+    );
+  }
   function setSpeed(next: (typeof SPEEDS)[number]): void {
     speed = next;
     speedButtons.forEach((b, i) => {
