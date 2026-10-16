@@ -42,12 +42,19 @@ describe('MatchRunner', () => {
     expect(outcome(replayed)).toBe(outcome(live));
   });
 
-  it('plays a different match when the same change lands one step later', () => {
+  // A one-step shift can legitimately change nothing (no bot may decide on that step), so these
+  // check the changes are applied at all, and at their own steps rather than whenever.
+  it('plays a different match without the recorded changes, or with them five seconds late', () => {
     const live = watched();
-    const late = live.timeline.map((t) => ({ ...t, step: t.step + 1 }));
-    const replayed = new MatchRunner(config, late);
-    replayed.advance(Infinity);
-    expect(outcome(replayed)).not.toBe(outcome(live));
+    const without = new MatchRunner(config);
+    without.advance(Infinity);
+    const late = new MatchRunner(
+      config,
+      live.timeline.map((t) => ({ ...t, step: t.step + 600 })),
+    );
+    late.advance(Infinity);
+    expect(outcome(without)).not.toBe(outcome(live));
+    expect(outcome(late)).not.toBe(outcome(live));
   });
 
   it('allows one substitution per side: the sub keeps the role, the knight taken off keeps his record', () => {

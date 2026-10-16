@@ -2,7 +2,7 @@ import type { TeamId } from '../game/types';
 
 /** How a team plays: tier decides how well a knight does each job, tactics which jobs. Peasants just swarm. */
 export interface Tactics {
-  /** low: the nearest knight only presses in our half. high: the second nearest presses too, anywhere. */
+  /** low: sit off the carrier until our half, then two press. high: two press deep in the rivals' half. */
   readonly press: 'low' | 'mid' | 'high';
   /** How far up the pitch the defence and midfield hold when the rivals have the ball. */
   readonly line: 'deep' | 'normal' | 'high';

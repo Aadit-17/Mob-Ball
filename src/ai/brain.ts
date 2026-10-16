@@ -283,6 +283,10 @@ const LINES = {
 
 /** With a low press the nearest knight only steps out while the ball is this far into the rivals' half, at most. */
 const LOW_PRESS_REACH = 40;
+/** Until then he stands this far goal-side of the ball, in the carrier's way, without diving in. */
+const CONTAIN_GAP = 40;
+/** A high press sends the second nearest too once the ball is this far into the rivals' half. */
+const HIGH_PRESS_LINE = 100;
 /** An attacker this far nearer our goal than the ball has run in behind and gets marked. */
 const IN_BEHIND = 40;
 /** How far along the lane to the carrier's outlet the forward stands to cut the pass back. */
@@ -307,6 +311,8 @@ function outfield(ctx: Context): Plan {
   memory.duty = pressing ? 'press' : null;
   if (!ours || pressing) memory.run = null;
   if (pressing) return carry(ctx);
+  if (carrier && carrier.team !== self.team && rank === 0 && ctx.tactics.press === 'low')
+    return at(toward(ctx.ball, OWN_GOAL, CONTAIN_GAP));
   if (!carrier && !ours && rank === 1 && skill.contest > 1) {
     memory.duty = 'cover';
     return at(toward(ctx.lead, OWN_GOAL, SECOND_BALL_GAP));
@@ -324,13 +330,16 @@ function outfield(ctx: Context): Plan {
 }
 
 /**
- * Whether this bot goes for the ball. The nearest always contests a loose ball; against a rival carrier
- * a low press waits for him to reach our half, and a high press sends the second nearest too.
+ * Whether this bot goes for the ball. The nearest always contests a loose ball. Against a rival carrier,
+ * a low press sits off him until he reaches our half and then sends two; a high press sends two deep in his.
  */
 function presses({ tactics, carrier, self, ball }: Context, rank: number): boolean {
   if (carrier?.team === self.team) return false;
-  if (rank === 0) return tactics.press !== 'low' || !carrier || ball.x < PITCH.centerX + LOW_PRESS_REACH;
-  return rank === 1 && tactics.press === 'high' && carrier !== null;
+  const ourHalf = ball.x < PITCH.centerX + LOW_PRESS_REACH;
+  if (rank === 0) return tactics.press !== 'low' || !carrier || ourHalf;
+  if (rank !== 1 || !carrier) return false;
+  if (tactics.press === 'high') return ball.x > PITCH.centerX + HIGH_PRESS_LINE;
+  return tactics.press === 'low' && ourHalf;
 }
 
 /** Opponents who could receive a pass from the carrier. */
@@ -590,7 +599,7 @@ function bankAim(ctx: Context, target: Vec): Vec | null {
 const SHOOTING = {
   patient: { range: 0.8, passChance: 0.55, patience: 1 },
   normal: { range: 1, passChance: 0.35, patience: 0.6 },
-  early: { range: 1.3, passChance: 0.15, patience: 0.25 },
+  early: { range: 1.1, passChance: 0.15, patience: 0.25 },
 } as const satisfies Record<Tactics['shooting'], object>;
 /** An opponent this close to the ball means shoot now, or lose it. */
 const PRESSURE_DISTANCE = 55;
