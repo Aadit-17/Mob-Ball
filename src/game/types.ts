@@ -29,7 +29,8 @@ export interface Body {
 export interface Knight extends Body {
   readonly id: number;
   readonly team: TeamId;
-  readonly role: Role;
+  /** Changed mid-match only by `swapRoles`, from the dugout. */
+  role: Role;
   readonly look: Look;
   readonly build: BuildStats;
   readonly human: boolean;

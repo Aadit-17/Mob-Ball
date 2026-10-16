@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_TACTICS, type Tactics } from '../ai/tactics';
-import { createMatch, knightById, stepMatch } from '../game/match';
+import { MATCH, PITCH, STEP } from '../game/constants';
+import { BotBrain } from '../ai/brain';
+import { createMatch, knightById, stepMatch, swapRoles } from '../game/match';
 import { houseById } from '../setup/houses';
 import { rosterLineup } from '../setup/rosters';
 import { setTeamTier } from '../setup/squads';
@@ -14,6 +16,7 @@ const config: FixtureConfig = {
 };
 const CHARGE: Tactics = { press: 'high', shooting: 'early' };
 const bench = spec('mid', { tier: 4, speedFactor: 1 });
+const steps = (seconds: number): number => seconds / STEP;
 
 /** Where the match ended up, precisely enough that any divergence shows. */
 const outcome = (r: MatchRunner) =>
@@ -27,6 +30,7 @@ function watched(): MatchRunner {
     runner.advance(chunks[i % chunks.length] ?? 1);
     if (runner.step > 3000 && runner.timeline.length === 0)
       runner.act(0, { kind: 'tactics', tactics: CHARGE });
+    if (runner.step > 4500 && runner.timeline.length === 1) runner.act(0, { kind: 'positions', a: 1, b: 2 });
     if (runner.step > 6000 && runner.subsLeft(0) > 0)
       runner.act(0, { kind: 'substitution', offId: 2, on: bench });
   }
@@ -36,7 +40,7 @@ function watched(): MatchRunner {
 describe('MatchRunner', () => {
   it('replays a watched match exactly from its recorded timeline', () => {
     const live = watched();
-    expect(live.timeline.map((t) => t.action.kind)).toEqual(['tactics', 'substitution']);
+    expect(live.timeline.map((t) => t.action.kind)).toEqual(['tactics', 'positions', 'substitution']);
     const replayed = new MatchRunner(config, live.timeline);
     replayed.advance(Infinity);
     expect(outcome(replayed)).toBe(outcome(live));
@@ -91,6 +95,69 @@ describe('MatchRunner', () => {
     runner.advance(1);
     expect(runner.state.knights[0]?.id).toBe(0);
     expect(runner.subsLeft(1)).toBe(1);
+  });
+
+  it("swaps two knights' roles without using the substitution, and a sub takes the role he is playing", () => {
+    const runner = new MatchRunner(config);
+    runner.act(0, { kind: 'positions', a: 0, b: 3 });
+    runner.advance(1);
+    expect(runner.state.knights.slice(0, 4).map((k) => k.role)).toEqual(['fwd', 'def', 'mid', 'gk']);
+    expect(runner.subsLeft(0)).toBe(1);
+    expect(runner.timeline).toEqual([{ step: 0, team: 0, action: { kind: 'positions', a: 0, b: 3 } }]);
+    runner.act(0, { kind: 'substitution', offId: 3, on: bench });
+    runner.advance(1);
+    expect(runner.state.knights[3]?.role).toBe('gk');
+    expect(runner.subsLeft(0)).toBe(0);
+  });
+
+  it('ignores a swap across teams, with an unknown knight, or of a knight with himself', () => {
+    const runner = new MatchRunner(config);
+    for (const [a, b] of [
+      [0, 4],
+      [4, 5],
+      [0, 99],
+      [2, 2],
+    ] as const)
+      runner.act(0, { kind: 'positions', a, b });
+    runner.advance(1);
+    expect(runner.state.knights.map((k) => k.role).join()).toBe('gk,def,mid,fwd,gk,def,mid,fwd');
+    expect(runner.timeline).toEqual([]);
+  });
+
+  it('plays the new keeper in goal, and the old one out of it, straight after a swap', () => {
+    const runner = new MatchRunner(config);
+    runner.advance(steps(20));
+    runner.act(0, { kind: 'positions', a: 0, b: 3 });
+    const [oldKeeper, newKeeper] = [runner.state.knights[0], runner.state.knights[3]];
+    if (!oldKeeper || !newKeeper) throw new Error('missing knight');
+    let deepest = 0;
+    let furthest = 0;
+    for (let i = 0; i < steps(8); i++) {
+      runner.advance(1);
+      if (i > steps(3)) deepest = Math.max(deepest, newKeeper.x - PITCH.left);
+      furthest = Math.max(furthest, oldKeeper.x - PITCH.left);
+    }
+    expect(deepest).toBeLessThan(150);
+    expect(furthest).toBeGreaterThan(400);
+  });
+
+  // Reaction times hold a plan for a moment, so at some of these times the forward is mid-run.
+  it('has a knight given a new role drop his old plan and decide again at once', () => {
+    let checked = 0;
+    for (let at = 10; at < MATCH.duration; at += 5) {
+      const state = createMatch(config);
+      const brain = new BotBrain();
+      while (MATCH.duration - state.clock < at || state.phase !== 'play')
+        stepMatch(state, (k) => brain.input(state, k));
+      const forward = state.knights[3];
+      if (!forward || forward.x < PITCH.left + 300) continue;
+      swapRoles(state, 0, 3);
+      brain.reassign(0);
+      brain.reassign(3);
+      expect(brain.input(state, forward).moveX, `at ${String(at)}s`).toBeLessThan(0);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(4);
   });
 
   it('lets AI managers act, and makes the same changes again on replay', () => {

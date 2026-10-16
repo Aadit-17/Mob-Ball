@@ -1,13 +1,15 @@
 import { BotBrain } from '../ai/brain';
 import { BOTH_DEFAULT, withTactics, type Tactics, type TeamTactics } from '../ai/tactics';
 import { STEP } from '../game/constants';
-import { createMatch, stepMatch, substitute, type KnightSpec } from '../game/match';
+import { createMatch, stepMatch, substitute, swapRoles, type KnightSpec } from '../game/match';
 import type { Input, Knight, MatchState, TeamId } from '../game/types';
 
 /** A change from the touchline. */
 export type ManagerAction =
   | { readonly kind: 'tactics'; readonly tactics: Tactics }
-  | { readonly kind: 'substitution'; readonly offId: number; readonly on: KnightSpec };
+  | { readonly kind: 'substitution'; readonly offId: number; readonly on: KnightSpec }
+  /** Two knights on the pitch, by runner id, swap roles. Free: it isn't a substitution. */
+  | { readonly kind: 'positions'; readonly a: number; readonly b: number };
 
 /** An action and the simulation step it took effect on. */
 export interface TimedAction {
@@ -141,10 +143,20 @@ export class MatchRunner {
       this.brain.setTactics(this.tactics);
       return true;
     }
+    if (action.kind === 'positions') return this.swap(team, action.a, action.b);
     const off = this.state.knights.find((k) => k.id === action.offId);
     if (off?.team !== team || this.subs[team] >= SUBS_ALLOWED) return false;
     substitute(this.state, action.offId, action.on);
     this.subs[team]++;
+    return true;
+  }
+
+  private swap(team: TeamId, a: number, b: number): boolean {
+    const onPitch = (id: number): boolean => this.state.knights.some((k) => k.id === id && k.team === team);
+    if (a === b || !onPitch(a) || !onPitch(b)) return false;
+    swapRoles(this.state, a, b);
+    this.brain.reassign(a);
+    this.brain.reassign(b);
     return true;
   }
 }

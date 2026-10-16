@@ -325,3 +325,14 @@ export function substitute(state: MatchState, offId: number, on: KnightSpec): Kn
   state.events.push({ type: 'substitution', team: off.team, offId, onId: id });
   return knight;
 }
+
+/**
+ * Swaps two teammates' roles. Nobody teleports: each walks to his new job from where he stands, and
+ * takes the new role's kick-off spot from the next kick-off.
+ */
+export function swapRoles(state: MatchState, aId: number, bId: number): void {
+  const a = state.knights.find((k) => k.id === aId);
+  const b = state.knights.find((k) => k.id === bId);
+  if (!a || !b || a === b || a.team !== b.team) throw new Error(`Knights ${aId} and ${bId} can't swap`);
+  [a.role, b.role] = [b.role, a.role];
+}

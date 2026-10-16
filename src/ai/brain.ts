@@ -85,6 +85,25 @@ export class BotBrain {
     this.tactics = tactics;
   }
 
+  /**
+   * Forgets what a knight was doing in his old role (a forward's run means nothing to a keeper), so he
+   * decides again at once in the new one. His reading of who has the ball isn't about his role, so stays.
+   */
+  reassign(id: number): void {
+    const memory = this.memory.get(id);
+    if (!memory) return;
+    Object.assign(memory, {
+      hold: 0,
+      plan: null,
+      shotY: null,
+      lift: null,
+      run: null,
+      openingSince: null,
+      duty: null,
+      mark: null,
+    } satisfies Partial<Memory>);
+  }
+
   input(state: MatchState, self: Knight, dt: number = STEP): Input {
     const skill = skillFor(self.tier);
     let memory = this.memory.get(self.id);

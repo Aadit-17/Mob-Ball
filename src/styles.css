@@ -1183,7 +1183,7 @@ kbd {
 
 .sub-cols {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 2fr 1fr;
   gap: 14px;
   margin-bottom: 4px;
 }
@@ -1192,6 +1192,17 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* Four to take off, two by two, so the card still fits a laptop screen with the positions row. */
+.sub-col.take-off {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+}
+
+.sub-col.take-off h4 {
+  grid-column: 1 / -1;
 }
 
 .sub-col h4 {
@@ -1233,14 +1244,122 @@ kbd {
   box-shadow: inset 0 0 0 2px var(--gold-rim);
 }
 
-.sub-pick[aria-pressed='true'] small {
+.sub-pick[aria-pressed='true'] small,
+.sub-pick[aria-pressed='true'] .sub-role {
   color: var(--on-gold);
+}
+
+.sub-role {
+  margin-left: 6px;
+  color: var(--gold-rim);
+  font: 700 11px var(--font-body);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .dugout-presets {
   display: flex;
   gap: 8px;
   margin: 4px 0 0 104px;
+}
+
+.pos-line {
+  flex-wrap: nowrap;
+  margin-top: 8px;
+}
+
+.pos-line > b small {
+  display: block;
+  color: var(--text-2);
+  font: 600 11px var(--font-body);
+  letter-spacing: 0;
+}
+
+/* Positions: drag one onto another (pointer events, so touch works too), or tap one then another. */
+.pos-row {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pos-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--iron-fill);
+  color: var(--text);
+  text-align: left;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  box-shadow: inset 0 0 0 2px var(--iron);
+}
+
+.pos-slot small {
+  color: var(--gold-rim);
+  font: 700 11px/1.2 var(--font-body);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.pos-slot b {
+  overflow: hidden;
+  font: 700 14px/1.2 var(--font-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pos-slot:hover {
+  box-shadow: inset 0 0 0 2px var(--gold-rim);
+}
+
+.pos-slot[aria-pressed='true'],
+.pos-slot.dragging {
+  background: linear-gradient(var(--gold-hi), #e2ad46);
+  color: var(--on-gold);
+  box-shadow: inset 0 0 0 2px var(--gold-rim);
+}
+
+.pos-slot[aria-pressed='true'] small,
+.pos-slot.dragging small {
+  color: var(--on-gold);
+}
+
+.pos-slot.dragging {
+  position: relative;
+  z-index: 2;
+  opacity: 0.9;
+  cursor: grabbing;
+  box-shadow:
+    inset 0 0 0 2px var(--gold-rim),
+    0 10px 22px rgba(0, 0, 0, 0.5);
+}
+
+.pos-slot.drop-target {
+  background: rgba(242, 193, 78, 0.22);
+  box-shadow:
+    inset 0 0 0 2px var(--gold-hi),
+    0 0 0 4px rgba(242, 193, 78, 0.5);
+}
+
+.pos-slot:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.dugout-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .btn:disabled {
@@ -1999,6 +2118,19 @@ kbd {
   }
 
   .sub-cols {
+    grid-template-columns: 1fr;
+  }
+
+  .pos-line {
+    flex-wrap: wrap;
+  }
+
+  .pos-row {
+    flex-basis: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sub-col.take-off {
     grid-template-columns: 1fr;
   }
 

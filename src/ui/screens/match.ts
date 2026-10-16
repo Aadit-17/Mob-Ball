@@ -4,7 +4,7 @@ import { sound } from '../../audio/sound';
 import { KNIGHT, MATCH, STEP } from '../../game/constants';
 import { knightById } from '../../game/match';
 import { randomSeed } from '../../game/rng';
-import type { MatchEvent, MatchState, TeamId } from '../../game/types';
+import type { Knight, MatchEvent, MatchState, Role, TeamId } from '../../game/types';
 import { Keyboard } from '../../input/keyboard';
 import type { Tactics } from '../../ai/tactics';
 import type { Dugout, GoalRecord, MatchResult, MatchSession } from '../../modes/mode';
@@ -18,6 +18,7 @@ import { choice } from '../choice';
 import { button, h } from '../dom';
 import { blockColour, crest, icon } from '../heraldry';
 import { lozengeBurst, reducedMotion } from '../motion';
+import { ROLE_NAMES } from './setup';
 
 /** Goals are replayed in slow motion for this long. */
 const SLOW_MOTION = { seconds: 0.6, scale: 0.25 } as const;
@@ -25,6 +26,10 @@ const SLOW_MOTION = { seconds: 0.6, scale: 0.25 } as const;
 const MAX_FRAME = 0.05;
 /** Speeds a watched match can run at; the simulation still advances in fixed steps, so the match is the same. */
 const SPEEDS = [1, 2, 4] as const;
+/** The dugout lists the four on the pitch deepest first. */
+const ROLE_ORDER: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
+/** A press on a position only becomes a drag once the pointer has moved this far, so a tap stays a tap. */
+const DRAG_START = 6;
 
 /** Maps match time onto a football clock: a full match reads as 90 minutes. */
 const footballMinute = (elapsed: number, duration: number, golden: boolean): string =>
@@ -69,6 +74,8 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   const bargeRing = h('div', { class: 'ring' });
   const overlay = h('div', { class: 'overlay', attrs: { hidden: '' } });
   const fx = h('div', { class: 'fx', attrs: { 'aria-hidden': 'true' } });
+  // Outside the overlay, which is rebuilt on every change, so screen readers hear each swap.
+  const dugoutNews = h('p', { class: 'dugout-live', attrs: { 'aria-live': 'polite' } });
   const teamBlock = (house: House, side: 'home' | 'away'): HTMLElement =>
     h('div', { class: `team ${side}` }, crest(house), h('span', { text: house.name.toUpperCase() }));
   const blocks = [teamBlock(homeHouse, 'home'), teamBlock(awayHouse, 'away')] as const;
@@ -144,6 +151,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           ),
         ),
         overlay,
+        dugoutNews,
       ),
       h('p', {
         class: 'hint',
@@ -227,6 +235,9 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     paused = !paused;
     if (paused && session.dugout) {
       planned = runner.tacticsOf(0);
+      roles = new Map(state.knights.filter((k) => k.team === 0).map((k) => [k.id, k.role]));
+      picked = null;
+      subbing = null;
       showDugout(session.dugout);
     } else if (paused) {
       showOverlay(
@@ -245,6 +256,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       );
     } else {
       if (planned && planned !== runner.tacticsOf(0)) runner.act(0, { kind: 'tactics', tactics: planned });
+      announceSwaps(sendSwaps());
       overlay.hidden = true;
     }
   };
@@ -255,6 +267,88 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   let takeOff: number | null = null;
   let bringOn: number | null = null;
   let change = '';
+  /** Roles as planned this pause, by runner id, and the swaps that get there, in order. */
+  let roles = new Map<number, Role>();
+  const swaps: [number, number][] = [];
+  let picked: number | null = null;
+  /** A substitution made this pause: it comes on when play resumes, so positions wait until then. */
+  let subbing: { offId: number; name: string } | null = null;
+  const roleOf = (k: Knight): Role => roles.get(k.id) ?? k.role;
+  const byRole = (knights: readonly Knight[]): Knight[] =>
+    [...knights].sort((a, b) => ROLE_ORDER.indexOf(roleOf(a)) - ROLE_ORDER.indexOf(roleOf(b)));
+
+  /** Sends the planned swaps to the pitch, in order, and returns the knights whose role changed. */
+  function sendSwaps(): Knight[] {
+    for (const [a, b] of swaps.splice(0)) runner.act(0, { kind: 'positions', a, b });
+    return state.knights.filter((k) => k.team === 0 && roleOf(k) !== k.role);
+  }
+
+  function announceSwaps(moved: readonly Knight[]): void {
+    if (!moved.length) return;
+    const line = moved.map((k) => `${k.look.name} ${ROLE_NAMES[roleOf(k)]}`).join(' · ');
+    say(`${big('SWITCH')}<div class="msg-line">${escape(line.toUpperCase())}</div>`, 2.2);
+  }
+
+  function swapPositions(a: Knight, b: Knight, dugout: Dugout): void {
+    const [ra, rb] = [roleOf(a), roleOf(b)];
+    roles.set(a.id, rb).set(b.id, ra);
+    swaps.push([a.id, b.id]);
+    picked = null;
+    dugoutNews.textContent = `${a.look.name} to ${ROLE_NAMES[rb]}, ${b.look.name} to ${ROLE_NAMES[ra]}.`;
+    showDugout(dugout);
+    overlay.querySelector<HTMLElement>(`[data-knight="${String(a.id)}"]`)?.focus();
+  }
+
+  /** Tap one position, then another, to swap them: the keyboard and touch way, and the drag fallback. */
+  function tapPosition(k: Knight, dugout: Dugout): void {
+    const first = state.knights.find((o) => o.id === picked);
+    if (first && first !== k) {
+      swapPositions(first, k, dugout);
+      return;
+    }
+    picked = first ? null : k.id;
+    dugoutNews.textContent = first ? '' : `${k.look.name} picked. Choose who to swap with.`;
+    showDugout(dugout);
+    overlay.querySelector<HTMLElement>(`[data-knight="${String(k.id)}"]`)?.focus();
+  }
+
+  function positions(dugout: Dugout): HTMLElement {
+    const ours = byRole(state.knights.filter((k) => k.team === 0));
+    const slots = ours.map((k) => {
+      const name = subbing?.offId === k.id ? subbing.name : k.look.name;
+      const slot = h(
+        'button',
+        {
+          class: 'pos-slot',
+          attrs: {
+            type: 'button',
+            'data-knight': String(k.id),
+            'aria-pressed': String(picked === k.id),
+            'aria-label': `${ROLE_NAMES[roleOf(k)]}: ${name}`,
+          },
+        },
+        h('small', { text: ROLE_NAMES[roleOf(k)] }),
+        h('b', { text: name }),
+      );
+      slot.disabled = subbing !== null;
+      dragToSwap(slot, {
+        tap: () => {
+          tapPosition(k, dugout);
+        },
+        drop: (target) => {
+          const other = ours.find((o) => String(o.id) === target.dataset.knight);
+          if (other) swapPositions(k, other, dugout);
+        },
+      });
+      return slot;
+    });
+    return h(
+      'div',
+      { class: 'choice pos-line' },
+      h('b', {}, 'Positions', h('small', { text: subbing ? 'after the change' : 'drag to swap' })),
+      h('div', { class: 'pos-row', attrs: { role: 'group', 'aria-label': 'Positions' } }, ...slots),
+    );
+  }
 
   function showDugout(dugout: Dugout): void {
     const tactics = planned ?? runner.tacticsOf(0);
@@ -262,7 +356,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       planned = { ...tactics, ...next };
       showDugout(dugout);
     };
-    const pickRow = (name: string, pressed: boolean, onPick: () => void): HTMLElement =>
+    const pickRow = (name: string, pressed: boolean, onPick: () => void, role?: Role): HTMLElement =>
       h(
         'button',
         {
@@ -270,13 +364,13 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           attrs: { type: 'button', 'aria-pressed': String(pressed) },
           on: { click: onPick },
         },
-        h('b', { text: name }),
+        h('b', {}, name, role && h('span', { class: 'sub-role', text: ROLE_NAMES[role] })),
         h('small', { text: dugout.details[name] ?? '' }),
       );
-    const column = (title: string, rows: HTMLElement[]): HTMLElement =>
+    const column = (title: string, rows: HTMLElement[], extra = ''): HTMLElement =>
       h(
         'div',
-        { class: 'sub-col', attrs: { role: 'group', 'aria-label': title } },
+        { class: `sub-col${extra}`, attrs: { role: 'group', 'aria-label': title } },
         h('h4', { text: title }),
         ...rows,
       );
@@ -286,7 +380,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       const on = bringOn === null ? undefined : benchLeft[bringOn];
       const off = starters.find((k) => k.id === takeOff);
       if (!on || !off) return;
+      // Swaps first: they name the knight going off, who has no id on the pitch once he's gone.
+      sendSwaps();
       runner.act(0, { kind: 'substitution', offId: off.id, on });
+      subbing = { offId: off.id, name: on.look.name };
       benchLeft.splice(bringOn ?? 0, 1);
       change = `${on.look.name} comes on for ${off.look.name}.`;
       showDugout(dugout);
@@ -299,12 +396,18 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
             { class: 'sub-cols' },
             column(
               'Take off',
-              starters.map((k) =>
-                pickRow(k.look.name, takeOff === k.id, () => {
-                  takeOff = k.id;
-                  showDugout(dugout);
-                }),
+              byRole(starters).map((k) =>
+                pickRow(
+                  k.look.name,
+                  takeOff === k.id,
+                  () => {
+                    takeOff = k.id;
+                    showDugout(dugout);
+                  },
+                  roleOf(k),
+                ),
               ),
+              ' take-off',
             ),
             column(
               'Bring on',
@@ -354,6 +457,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           }),
         ),
       ),
+      positions(dugout),
       h('h3', { text: subsLeft ? 'Substitution · 1 left' : 'Substitution' }),
       ...substitution,
       h(
@@ -491,4 +595,60 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     keyboard.dispose();
     sound.stopMatch();
   };
+}
+
+/**
+ * Drag a position onto another to swap them. Pointer events with capture rather than HTML5 drag and
+ * drop, which never fires on phones; a press that doesn't move is a tap (and Enter/Space a click).
+ */
+function dragToSwap(
+  slot: HTMLButtonElement,
+  on: { tap: () => void; drop: (target: HTMLElement) => void },
+): void {
+  let start: { x: number; y: number } | null = null;
+  let over: HTMLElement | null = null;
+  let dragged = false;
+  const targetAt = (x: number, y: number): HTMLElement | null =>
+    document
+      .elementsFromPoint(x, y)
+      .map((el) => el.closest<HTMLElement>('.pos-slot'))
+      .find((el) => el !== null && el !== slot) ?? null;
+  const hover = (target: HTMLElement | null): void => {
+    over?.classList.remove('drop-target');
+    target?.classList.add('drop-target');
+    over = target;
+  };
+  const reset = (): void => {
+    hover(null);
+    start = null;
+    slot.classList.remove('dragging');
+    slot.style.transform = '';
+  };
+  slot.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || slot.disabled) return;
+    start = { x: e.clientX, y: e.clientY };
+    dragged = false;
+    slot.setPointerCapture(e.pointerId);
+  });
+  slot.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    const [dx, dy] = [e.clientX - start.x, e.clientY - start.y];
+    if (!dragged && Math.hypot(dx, dy) < DRAG_START) return;
+    dragged = true;
+    slot.classList.add('dragging');
+    // Carried a little smaller, so the slot underneath shows its drop highlight round the edges.
+    slot.style.transform = `translate(${String(dx)}px, ${String(dy)}px) scale(0.86)`;
+    hover(targetAt(e.clientX, e.clientY));
+  });
+  slot.addEventListener('pointerup', () => {
+    const target = dragged ? over : null;
+    reset();
+    if (target) on.drop(target);
+    // The click that follows a drag (if the browser sends one) is swallowed, then taps work again.
+    if (dragged) setTimeout(() => (dragged = false));
+  });
+  slot.addEventListener('pointercancel', reset);
+  slot.addEventListener('click', () => {
+    if (!dragged) on.tap();
+  });
 }
