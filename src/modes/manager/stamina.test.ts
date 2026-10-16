@@ -239,6 +239,20 @@ describe('chooseLineup', () => {
     expect(ids(lineup.bench).sort()).toEqual(['e', 'f']);
   });
 
+  it('puts the starter the outfield would miss least in goal, not a heavy star', () => {
+    const squad = [
+      knight('legend', 4, HEFTY),
+      knight('champion', 3),
+      knight('knight', 2, NIMBLE),
+      knight('squire', 1),
+      knight('p1', 0),
+      knight('p2', 0),
+    ];
+    const lineup = chooseLineup(squad, freshStamina(squad), balanced, MATCHDAYS);
+    expect(lineup.starters[0]?.knight.id).toBe('squire');
+    expect(lineup.starters.map((s) => s.knight.id)).toContain('legend');
+  });
+
   it('rests a knight below FRESH when a fresher one of the same tier is on the bench', () => {
     const stamina = { a: 62, b: 100, c: 100, d: 100, e: 100, f: 90 };
     expect(starterIds(evenSquad, stamina)).not.toContain('a');

@@ -125,16 +125,21 @@ const startValue = (knight: SquadKnight, stamina: number, weight: number): numbe
 
 const ROLES: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
 
-/** The heaviest build in goal (a Hefty covers the most of it), then heaviest to lightest up the pitch. */
-function assignRoles(starters: readonly SquadKnight[]): Starter[] {
-  const byBuild = [...starters].sort(
-    (a, b) => b.look.build - a.look.build || b.tier - a.tier || a.id.localeCompare(b.id),
+/**
+ * In goal, the starter the outfield would miss least: no keeper tier or build measured as worth anything,
+ * while a star in goal cost his side about a goal a match. Ties go to the heavier build, then the rest
+ * line up heaviest to lightest.
+ */
+function assignRoles(starters: readonly SquadKnight[], stamina: Stamina): Starter[] {
+  const missed = (k: SquadKnight): number =>
+    worth(k.tier, k.look.build, 'mid', staminaOf(stamina, k.id)) - worth(k.tier, k.look.build, 'gk', 0);
+  const [keeper, ...rest] = [...starters].sort(
+    (a, b) => missed(a) - missed(b) || b.look.build - a.look.build || a.id.localeCompare(b.id),
   );
-  const keeper = byBuild[0];
   if (!keeper) throw new Error('No starters');
-  const outfield = byBuild
-    .slice(1)
-    .sort((a, b) => b.look.build - a.look.build || a.tier - b.tier || a.id.localeCompare(b.id));
+  const outfield = rest.sort(
+    (a, b) => b.look.build - a.look.build || a.tier - b.tier || a.id.localeCompare(b.id),
+  );
   return [keeper, ...outfield].map((knight, i) => ({ knight, role: ROLES[i] ?? 'mid' }));
 }
 
@@ -160,7 +165,7 @@ export function chooseLineup(
     .map(({ knight, s }) => ({ knight, s, value: startValue(knight, s, weight) }))
     .sort((a, b) => b.value - a.value || b.s - a.s || a.knight.id.localeCompare(b.knight.id))
     .map((r) => r.knight);
-  return { starters: assignRoles(ranked.slice(0, STARTERS)), bench: ranked.slice(STARTERS) };
+  return { starters: assignRoles(ranked.slice(0, STARTERS), stamina), bench: ranked.slice(STARTERS) };
 }
 
 /** All in when chasing the game late: press high, push up, shoot on sight. */
