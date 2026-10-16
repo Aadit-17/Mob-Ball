@@ -225,15 +225,12 @@ describe('league scorers', () => {
   }, 30_000);
 
   it("credits a rival manager's substitute, numbered after the other side's", () => {
-    // Rivals rotate tired knights out before kick-off, so a whole squad a little below fresh brings subs on.
+    // Rivals sub in most matches, so some rival fixture soon has both sides subbing and a sub scoring.
     const scored = SEEDS.some((seed) => {
       const season = drafted(seed);
       return fixtures(season.league ?? (null as never), 0).some((fixture) => {
         if (fixture.home === PLAYER || fixture.away === PLAYER) return false;
-        const stamina = { ...season.stamina };
-        for (const house of [fixture.home, fixture.away])
-          stamina[house] = Object.fromEntries(squadOf(season.draft, house).map((k) => [k.id, 70]));
-        const run = playFixture({ ...season, stamina }, fixture);
+        const run = playFixture(season, fixture);
         expectScorersAsRun(run);
         return run.runner.state.substituted.length === 2 && subGoals([run]) > 0;
       });
