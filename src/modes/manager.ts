@@ -77,11 +77,12 @@ export const draftProgress = (season: SeasonState): number => season.draft.picks
 function finishPlayerMatch(
   app: AppContext,
   plan: MatchPlan,
-  result: Pick<MatchResult, 'score' | 'steps' | 'timeline'>,
+  result: Pick<MatchResult, 'score' | 'steps' | 'timeline' | 'goalLog'>,
 ): void {
   const season = app.season;
   if (!season?.league || playerFixture(season.league)?.score) return;
-  app.setSeason(plan.finish(season, { score: result.score, steps: result.steps, timeline: result.timeline }));
+  const { score, steps, timeline, goalLog } = result;
+  app.setSeason(plan.finish(season, { score, steps, timeline, goals: goalLog }));
 }
 
 /** Plays the player's match of the current matchday without watching it: the same match, instantly. */
@@ -92,7 +93,12 @@ export function skipPlayerMatch(app: AppContext): void {
   const runner = new MatchRunner(plan.config());
   runner.advance(Infinity);
   const [a, b] = runner.state.score;
-  finishPlayerMatch(app, plan, { score: [a, b], steps: runner.step, timeline: runner.timeline });
+  finishPlayerMatch(app, plan, {
+    score: [a, b],
+    steps: runner.step,
+    timeline: runner.timeline,
+    goalLog: runner.goals,
+  });
 }
 
 /** Credits a league title once, when the last matchday is in and the player's house is top. */

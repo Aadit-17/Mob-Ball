@@ -2,7 +2,7 @@ import { DEFAULT_TACTICS, type Tactics } from '../../ai/tactics';
 import { ROLES_BY_SIZE } from '../../game/formation';
 import type { KnightSpec } from '../../game/match';
 import type { Look } from '../../knight/look';
-import type { FixtureConfig, Manager, TimedAction } from '../runner';
+import type { FixtureConfig, GoalLog, Manager, TimedAction } from '../runner';
 import {
   applyPick,
   autoPick,
@@ -19,6 +19,7 @@ import {
   createLeague,
   currentMatchday,
   fixtures,
+  FIXTURES_PER_MATCHDAY,
   fixtureSeed,
   MATCHDAYS,
   normalizeLeague,
@@ -50,10 +51,25 @@ export interface PlayerPlan {
   readonly tactics: Tactics;
 }
 
+/** A goal in a league fixture: the side it counted for (0 home, 1 away) and the squad id of the knight
+ * who put it in, null if nobody touched it. An own goal's scorer plays for the other side. */
+export interface FixtureGoal {
+  readonly side: 0 | 1;
+  readonly scorer: string | null;
+  readonly ownGoal: boolean;
+}
+
+/** What happened in one played fixture beyond its score; later stats hang off the same record. */
+export interface FixtureRecord {
+  readonly goals: readonly FixtureGoal[];
+}
+
 /** A Manager mode season: the draft, then the league once the draft is done. */
 export interface SeasonState {
   readonly draft: DraftState;
   readonly league: LeagueState | null;
+  /** A record per fixture, laid out like the league's results; null until played, empty before the league. */
+  readonly records: readonly (readonly (FixtureRecord | null)[])[];
   /** Stamina of every drafted knight, by house then squad id; empty until the league starts. */
   readonly stamina: Readonly<Record<string, Stamina>>;
   readonly plan: PlayerPlan | null;
@@ -68,11 +84,15 @@ export function startSeason(seed: number, playerHouse: string, forged: Look): Se
   return {
     draft: runRivalPicks(startDraft(seed, playerHouse, forged)),
     league: null,
+    records: [],
     stamina: {},
     plan: null,
     titleCounted: false,
   };
 }
+
+const emptyRecords = (): (FixtureRecord | null)[][] =>
+  Array.from({ length: MATCHDAYS }, () => Array.from({ length: FIXTURES_PER_MATCHDAY }, () => null));
 
 /** The rival houses pick until it is the player's turn again; the league starts once the draft is done. */
 function afterPlayerPick(season: SeasonState, draft: DraftState): SeasonState {
@@ -90,7 +110,7 @@ function beginLeague(season: SeasonState): SeasonState {
   const { seed, playerHouse } = season.draft;
   const league = createLeague({ seed, playerHouse }, DRAFT_HOUSES);
   const stamina = Object.fromEntries(DRAFT_HOUSES.map((h) => [h, freshStamina(squadOf(season.draft, h))]));
-  const started: SeasonState = { ...season, league, stamina };
+  const started: SeasonState = { ...season, league, records: emptyRecords(), stamina };
   const lineup = chooseLineup(
     squadOf(season.draft, playerHouse),
     stamina[playerHouse] ?? {},
@@ -186,6 +206,8 @@ export interface MatchOutcome {
   readonly steps: number;
   /** Changes made from the player's dugout; rival managers report their own. */
   readonly timeline: readonly TimedAction[];
+  /** Every goal with the runner knight credited, as `MatchRunner.goals` logs them. */
+  readonly goals: readonly GoalLog[];
 }
 
 /** Everything needed to play one league fixture, watched or headless, and to record it afterwards. */
@@ -227,17 +249,25 @@ export function planMatch(season: SeasonState, fixture: LeagueFixture): MatchPla
       if (!current.league) throw new Error('The league has not started');
       const [l, r] = outcome.score;
       const score: Score = playerAway ? [r, l] : [l, r];
+      const subs = [
+        substitutionOf(left, managers[0], outcome, 0),
+        substitutionOf(right, managers[1], outcome, 1),
+      ] as const;
       const charge = (side: Side, team: 0 | 1): Stamina => {
         const play = {
           starters: side.lineup.starters.map((s) => s.knight.id),
-          substitution: substitutionOf(side, managers[team], outcome, team),
+          substitution: subs[team],
           matchSteps: outcome.steps,
         };
         return afterMatchday(current.stamina[side.house] ?? {}, play);
       };
+      const record = { goals: fixtureGoals([left, right], subs, outcome.goals, playerAway) };
       return {
         ...current,
         league: recordResult(current.league, fixture.matchday, fixture.index, score),
+        records: current.records.map((day, d) =>
+          d === fixture.matchday ? day.map((r, i) => (i === fixture.index ? record : r)) : day,
+        ),
         stamina: { ...current.stamina, [left.house]: charge(left, 0), [right.house]: charge(right, 1) },
       };
     },
@@ -268,6 +298,65 @@ function substitutionOf(
   return null;
 }
 
+/**
+ * Squad ids by runner knight id. The left side's starters are runner knights 0–3 and the right's 4–7, in
+ * line-up order; each substitute takes the next free id, so subs are numbered in the order they came on
+ * (by step, the left side first within a step, as the runner applies them).
+ */
+export function runnerSquadIds(
+  lineups: readonly [Lineup, Lineup],
+  subs: readonly [Substitution | null, Substitution | null],
+): Map<number, string> {
+  const starters = lineups.flatMap((l) => l.starters.map((s) => s.knight.id));
+  const ids = new Map(starters.map((id, runnerId) => [runnerId, id]));
+  const cameOn = subs
+    .flatMap((sub, team) => (sub ? [{ ...sub, team }] : []))
+    .sort((a, b) => a.step - b.step || a.team - b.team);
+  for (const [i, sub] of cameOn.entries()) ids.set(starters.length + i, sub.onId);
+  return ids;
+}
+
+/** The runner's goal log in squad ids, sides turned to home and away. */
+function fixtureGoals(
+  sides: readonly [Side, Side],
+  subs: readonly [Substitution | null, Substitution | null],
+  log: readonly GoalLog[],
+  playerAway: boolean,
+): FixtureGoal[] {
+  const ids = runnerSquadIds([sides[0].lineup, sides[1].lineup], subs);
+  return log.map((goal) => ({
+    side: (playerAway ? 1 - goal.team : goal.team) as 0 | 1,
+    scorer: goal.scorerId === null ? null : (ids.get(goal.scorerId) ?? null),
+    ownGoal: goal.ownGoal,
+  }));
+}
+
+/** One row of the league's scoring chart. */
+export interface ScorerRow {
+  readonly knight: SquadKnight;
+  readonly house: string;
+  readonly goals: number;
+}
+
+/** Every knight with a league goal, most first; ties go alphabetically by name, then squad id. Own goals
+ * and goals nobody touched count for nobody. */
+export function topScorers(season: SeasonState): ScorerRow[] {
+  const goals = new Map<string, number>();
+  for (const goal of season.records.flat().flatMap((r) => r?.goals ?? []))
+    if (goal.scorer !== null && !goal.ownGoal) goals.set(goal.scorer, (goals.get(goal.scorer) ?? 0) + 1);
+  const rows = DRAFT_HOUSES.flatMap((house) =>
+    squadOf(season.draft, house).map((knight) => ({ knight, house, goals: goals.get(knight.id) ?? 0 })),
+  );
+  return rows
+    .filter((r) => r.goals > 0)
+    .sort(
+      (a, b) =>
+        b.goals - a.goals ||
+        a.knight.look.name.localeCompare(b.knight.look.name) ||
+        a.knight.id.localeCompare(b.knight.id),
+    );
+}
+
 /** The fixtures of the current matchday not involving the player, once the player's match is in. */
 export function otherFixtures(season: SeasonState): LeagueFixture[] {
   const { league } = season;
@@ -292,16 +381,66 @@ function normalizeTactics(raw: unknown): Tactics | null {
     : null;
 }
 
+function normalizeGoal(raw: unknown): FixtureGoal | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { side, scorer, ownGoal } = raw as Record<string, unknown>;
+  if ((side !== 0 && side !== 1) || typeof ownGoal !== 'boolean') return null;
+  return scorer === null || typeof scorer === 'string' ? { side, scorer, ownGoal } : null;
+}
+
+/** A played fixture's record, or null unless every goal is by a knight on the right side (the other
+ * side's for an own goal) and neither side has more goals logged than it scored. */
+function normalizeRecord(raw: unknown, draft: DraftState, fixture: LeagueFixture): FixtureRecord | null {
+  const score = fixture.score;
+  const goals = (raw as Record<string, unknown> | null)?.goals;
+  if (!score || !Array.isArray(goals)) return null;
+  const read = goals.map(normalizeGoal);
+  if (!read.every((g): g is FixtureGoal => g !== null)) return null;
+  const squads = [squadOf(draft, fixture.home), squadOf(draft, fixture.away)];
+  const fits = (g: FixtureGoal): boolean =>
+    g.scorer === null || (squads[g.ownGoal ? 1 - g.side : g.side] ?? []).some((k) => k.id === g.scorer);
+  const within = ([0, 1] as const).every((side) => read.filter((g) => g.side === side).length <= score[side]);
+  return read.every(fits) && within ? { goals: read } : null;
+}
+
+function normalizeRecords(
+  raw: unknown,
+  draft: DraftState,
+  league: LeagueState,
+): SeasonState['records'] | null {
+  if (!Array.isArray(raw) || raw.length !== MATCHDAYS) return null;
+  const records = emptyRecords();
+  for (let matchday = 0; matchday < MATCHDAYS; matchday++) {
+    const day: unknown = raw[matchday];
+    if (!Array.isArray(day) || day.length !== FIXTURES_PER_MATCHDAY) return null;
+    for (const fixture of fixtures(league, matchday)) {
+      const saved: unknown = day[fixture.index];
+      // A record exactly where the league has a score: an unplayed fixture has none.
+      if (!fixture.score) {
+        if (saved !== null) return null;
+        continue;
+      }
+      const record = normalizeRecord(saved, draft, fixture);
+      if (!record) return null;
+      (records[matchday] ?? [])[fixture.index] = record;
+    }
+  }
+  return records;
+}
+
 /** Reads a saved season, or null for anything that isn't a real draft, league and squads that fit together. */
 export function normalizeSeason(raw: unknown): SeasonState | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const source = raw as Record<string, unknown>;
   const draft = normalizeDraft(source.draft);
   if (!draft) return null;
-  if (!isDraftComplete(draft)) return { draft, league: null, stamina: {}, plan: null, titleCounted: false };
+  if (!isDraftComplete(draft))
+    return { draft, league: null, records: [], stamina: {}, plan: null, titleCounted: false };
 
   const league = normalizeLeague(source.league, DRAFT_HOUSES);
   if (league?.seed !== draft.seed || league.playerHouse !== draft.playerHouse) return null;
+  const records = normalizeRecords(source.records, draft, league);
+  if (!records) return null;
   const rawStamina = source.stamina;
   if (typeof rawStamina !== 'object' || rawStamina === null) return null;
   const stamina: Record<string, Stamina> = {};
@@ -322,7 +461,7 @@ export function normalizeSeason(raw: unknown): SeasonState | null {
     return null;
   try {
     const titleCounted = source.titleCounted === true;
-    return setPlan({ draft, league, stamina, plan: null, titleCounted }, { starters, tactics });
+    return setPlan({ draft, league, records, stamina, plan: null, titleCounted }, { starters, tactics });
   } catch {
     return null;
   }

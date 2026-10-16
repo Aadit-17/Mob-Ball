@@ -412,6 +412,52 @@
   background: linear-gradient(180deg, #2a262e, #1f1c23);
 }
 
+/* Cards drag on pointer events: a vertical swipe still scrolls, a sideways move or long press lifts. */
+.squad-card {
+  touch-action: pan-y pinch-zoom;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: grab;
+}
+
+.squad-card canvas {
+  pointer-events: none;
+}
+
+.squad-sheet.is-dragging,
+.squad-sheet.is-dragging .squad-card {
+  cursor: grabbing;
+}
+
+.squad-card.is-lifted {
+  position: relative;
+  z-index: 5;
+  transition: none;
+  box-shadow:
+    inset 0 0 0 3px var(--gold-hi),
+    0 16px 28px rgba(0, 0, 0, 0.55);
+}
+
+.squad-sheet.is-dragging .squad-card:not(.is-lifted, .is-drop-target):hover {
+  transform: none;
+  box-shadow:
+    inset 0 0 0 2px var(--iron),
+    0 3px 0 var(--drop);
+}
+
+.squad-card.is-drop-target {
+  background:
+    radial-gradient(ellipse 90% 60% at 50% 40%, rgba(242, 193, 78, 0.28), transparent 75%),
+    linear-gradient(180deg, #3a3340, #2a252e);
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 0 0 3px var(--gold),
+    0 0 0 4px rgba(242, 193, 78, 0.45),
+    0 0 22px 4px rgba(242, 193, 78, 0.35),
+    0 6px 0 var(--drop);
+}
+
 .squad-card.is-bench canvas {
   opacity: 0.85;
 }
@@ -500,6 +546,182 @@
 
 .squad-actions .btn-primary {
   order: 1;
+}
+
+/* ---------- top scorers ---------- */
+.md-scorers {
+  padding: 14px 16px 12px;
+}
+
+/* Two columns read down then across, so 1–4 sit left of 5–8. */
+.scorer-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  columns: 2;
+  column-gap: 24px;
+}
+
+.scorer {
+  display: grid;
+  grid-template-columns: 26px 36px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  break-inside: avoid;
+}
+
+.scorer + .scorer,
+.scorer-gap + .scorer {
+  border-top: 1px solid rgba(156, 132, 96, 0.28);
+}
+
+.scorer-pos {
+  color: var(--text-2);
+  font: 700 16px/1 var(--font-hud);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.scorer canvas {
+  display: block;
+  width: 36px;
+  height: 42px;
+}
+
+.scorer-who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+.scorer-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scorer-name b {
+  overflow: hidden;
+  color: #fff3d6;
+  font: 700 17px/1.2 var(--font-hud);
+  letter-spacing: 0.3px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-name .you-tag {
+  flex: none;
+}
+
+.scorer-house {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-2);
+  font: 700 13px/1.2 var(--font-hud);
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+.scorer-house .tie-shield {
+  width: 16px;
+  height: 19px;
+  padding-bottom: 3px;
+}
+
+.scorer-house .tie-shield .crest {
+  width: 10px;
+  height: 10px;
+}
+
+.scorer.is-you .scorer-house {
+  color: var(--gold-text);
+}
+
+.scorer-goals {
+  grid-column: -2;
+}
+
+.scorer-goals b {
+  display: block;
+  min-width: 28px;
+  color: #fff3d6;
+  font: 800 20px/1 var(--font-hud);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The player's own knight stands out on whichever house he plays for. */
+.scorer.is-forged {
+  background: rgba(242, 193, 78, 0.12);
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+.scorer.is-forged .scorer-name b {
+  color: var(--gold-text);
+}
+
+.scorer.is-boot {
+  background:
+    radial-gradient(ellipse 70% 120% at 0% 50%, rgba(242, 193, 78, 0.26), transparent 70%),
+    rgba(242, 193, 78, 0.08);
+}
+
+.scorer.is-boot .scorer-pos,
+.scorer.is-boot .scorer-goals b {
+  color: var(--gold);
+}
+
+.scorer-boot {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: linear-gradient(var(--gold-hi), #e2ad46);
+  color: var(--on-gold);
+  font: 800 12px/1.3 var(--font-hud);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.scorer-boot svg {
+  width: 14px;
+  height: 14px;
+}
+
+.scorer-gap {
+  color: var(--text-2);
+  text-align: center;
+  break-inside: avoid;
+}
+
+.md-empty {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.md-boot {
+  margin: 0;
+  text-align: center;
+  color: var(--gold-text);
+  font: 700 16px/1.3 var(--font-hud);
+  letter-spacing: 0.3px;
+}
+
+.md-boot svg {
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  vertical-align: -4px;
+  color: var(--gold);
 }
 
 /* ---------- matchday results ---------- */
@@ -613,6 +835,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .scorer-list {
+    columns: 1;
+  }
+
   .squad-row.is-bench {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -660,8 +886,21 @@
     height: 52px;
   }
 
-  .league-table {
+  .league-table,
+  .md-scorers {
     padding: 12px 10px 10px;
+  }
+
+  .scorer {
+    gap: 8px;
+    padding: 5px 4px;
+  }
+
+  /* On a phone the badge would crowd the name; the boot shows as a gold row with the ball beside it. */
+  .scorer-boot {
+    padding: 3px;
+    font-size: 0;
+    letter-spacing: 0;
   }
 
   /* The house column stays put while the numbers scroll under it; solid, so they pass behind it. */

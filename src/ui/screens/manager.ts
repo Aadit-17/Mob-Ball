@@ -25,6 +25,8 @@ import {
   planMatch,
   playerLineup,
   setPlan,
+  topScorers,
+  type ScorerRow,
   type SeasonState,
 } from '../../modes/manager/season';
 import { CHARGE, FRESH, HOLD, STAMINA_MAX } from '../../modes/manager/stamina';
@@ -44,6 +46,17 @@ const STEPS_PER_FRAME = 1200;
 const RESULT_PACE_MS = 700;
 
 const ROLES = ROLES_BY_SIZE[4];
+
+/** Rows of the scoring chart on the hub, and on the season-end screen. */
+const SCORERS_ON_HUB = 8;
+const SCORERS_AT_END = 10;
+/** A press has to travel this far before it becomes a drag, so taps stay taps. */
+const DRAG_THRESHOLD_PX = 8;
+/** On touch, holding a card this long lifts it, so a drag can go any way without scrolling the page. */
+const LONG_PRESS_MS = 350;
+/** Within this distance of the top or bottom of the screen, a dragged card scrolls the page. */
+const DRAG_EDGE_PX = 56;
+const DRAG_SCROLL_PX = 12;
 
 const PRESETS = [
   { value: 'charge', label: 'Charge!', tactics: CHARGE },
@@ -218,6 +231,90 @@ function leagueTable(league: LeagueState, options: TableOptions): HTMLElement {
   );
 }
 
+const goalsText = (n: number): string => `${n} ${n === 1 ? 'goal' : 'goals'}`;
+
+interface ScorersOptions {
+  readonly title: string;
+  readonly limit: number;
+  /** The season is over: the leaders take the Golden Boot. */
+  readonly boot: boolean;
+}
+
+/** One knight on the scoring chart: place, portrait, name, house and goals. */
+function scorerRow(row: ScorerRow, place: number, playerHouse: string, boot: boolean): HTMLElement {
+  const house = houseById(row.house);
+  const canvas = h('canvas', { attrs: { 'aria-hidden': 'true' } });
+  drawPortrait(canvas, row.knight.look, house.colour, { width: 36, height: 42 });
+  const forged = row.knight.forged;
+  const li = h(
+    'li',
+    {
+      class: ['scorer', forged && 'is-forged', row.house === playerHouse && 'is-you', boot && 'is-boot']
+        .filter(Boolean)
+        .join(' '),
+    },
+    h('span', { class: 'scorer-pos', text: String(place) }),
+    canvas,
+    h(
+      'span',
+      { class: 'scorer-who' },
+      h(
+        'span',
+        { class: 'scorer-name' },
+        h('b', { text: row.knight.look.name }),
+        forged && h('small', { class: 'you-tag', text: 'Your knight' }),
+      ),
+      h('small', { class: 'scorer-house' }, shield(house), h('span', { text: house.name })),
+    ),
+    boot && h('span', { class: 'scorer-boot', attrs: { title: 'Golden Boot' } }, icon('ball'), 'Golden Boot'),
+    h(
+      'span',
+      { class: 'scorer-goals' },
+      h('b', { text: String(row.goals) }),
+      h('span', { class: 'visually-hidden', text: row.goals === 1 ? ' goal' : ' goals' }),
+    ),
+  );
+  return li;
+}
+
+/** The league's top scorers; the player's forged knight is shown even when he is outside the top rows. */
+function scorersPanel(season: SeasonState, options: ScorersOptions): HTMLElement {
+  const rows = topScorers(season);
+  // Knights level on goals share a place: 1, 2, 2, 4.
+  const places = rows.map((row) => rows.findIndex((r) => r.goals === row.goals) + 1);
+  const shown = rows.slice(0, options.limit);
+  const forgedAt = rows.findIndex((r) => r.knight.forged);
+  const extra = forgedAt >= options.limit ? rows[forgedAt] : undefined;
+  const skipped = forgedAt > options.limit;
+  const top = rows[0]?.goals ?? 0;
+  const item = (row: ScorerRow, i: number): HTMLElement =>
+    scorerRow(row, places[i] ?? i + 1, season.draft.playerHouse, options.boot && row.goals === top);
+  return h(
+    'section',
+    { class: 'md-scorers panel' },
+    h('h3', { class: 'panel-title', text: options.title }),
+    rows.length
+      ? h(
+          'ol',
+          { class: 'scorer-list', attrs: { 'aria-label': options.title } },
+          ...shown.map(item),
+          skipped && h('li', { class: 'scorer-gap', attrs: { 'aria-hidden': 'true' }, text: '⋯' }),
+          extra && item(extra, forgedAt),
+        )
+      : h('p', { class: 'md-empty', text: 'No goals yet. The chart fills in as the matches are played.' }),
+  );
+}
+
+/** "Golden Boot: Ser Lionel of Thorn, 9 goals", shared when the top scorers are level. */
+function goldenBoot(season: SeasonState): string | null {
+  const rows = topScorers(season);
+  const top = rows[0]?.goals ?? 0;
+  const winners = rows.filter((r) => r.goals === top);
+  if (!winners.length) return null;
+  const names = winners.map((r) => `${r.knight.look.name} of ${houseById(r.house).name}`);
+  return `Golden Boot: ${names.join(' and ')}, ${goalsText(top)}${winners.length > 1 ? ' each' : ''}.`;
+}
+
 /** The league as it stood before `matchday`: its results taken back out. */
 const withoutMatchday = (league: LeagueState, matchday: number): LeagueState => ({
   ...league,
@@ -328,6 +425,181 @@ function squadCard(
   return card;
 }
 
+interface DragSwap {
+  /** A card was lifted from `slot`. */
+  lift(slot: number): void;
+  /** It was dropped on the card in `to`. */
+  drop(from: number, to: number): void;
+  /** It was let go anywhere else, or Escape was pressed. */
+  cancel(from: number): void;
+}
+
+interface Drag {
+  readonly pointerId: number;
+  readonly card: HTMLElement;
+  readonly from: number;
+  readonly x: number;
+  readonly y: number;
+  readonly scrollY: number;
+  lifted: boolean;
+  target: HTMLElement | null;
+  clientX: number;
+  clientY: number;
+  timer: number;
+}
+
+const slotOf = (card: HTMLElement): number => Number(card.dataset.slot);
+
+/**
+ * Drag a squad card onto another to swap them. Pointer events rather than HTML drag-and-drop, which
+ * phones never fire. A press only becomes a drag once it moves, or on touch once it is held, so taps
+ * still swap and a vertical swipe still scrolls (the cards allow pan-y). Returns a cleanup.
+ */
+function dragToSwap(sheet: HTMLElement, on: DragSwap): () => void {
+  let drag: Drag | null = null;
+  let swallowClick = false;
+  let frame = 0;
+
+  const cards = (): HTMLElement[] => [...sheet.querySelectorAll<HTMLElement>('.squad-card[data-slot]')];
+  const cardAt = (x: number, y: number, except: HTMLElement): HTMLElement | null =>
+    cards().find((card) => {
+      if (card === except) return false;
+      const r = card.getBoundingClientRect();
+      return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+    }) ?? null;
+
+  /** Follows the pointer, counting any scroll since the lift, and marks the card it is over. */
+  const follow = (d: Drag): void => {
+    const dx = d.clientX - d.x;
+    const dy = d.clientY - d.y + (window.scrollY - d.scrollY);
+    // Shrunk while held, so the card it would swap with still shows round its edges.
+    d.card.style.transform = `translate(${dx}px, ${dy}px) scale(0.8)`;
+    const target = cardAt(d.clientX, d.clientY, d.card);
+    if (target === d.target) return;
+    d.target?.classList.remove('is-drop-target');
+    target?.classList.add('is-drop-target');
+    d.target = target;
+  };
+
+  /** Near the top or bottom of the screen, scrolls toward it while the card is held there. */
+  const edgeScroll = (): void => {
+    const d = drag;
+    if (!d?.lifted) return;
+    const y = d.clientY;
+    const step =
+      y < DRAG_EDGE_PX ? -DRAG_SCROLL_PX : y > window.innerHeight - DRAG_EDGE_PX ? DRAG_SCROLL_PX : 0;
+    if (step) {
+      window.scrollBy(0, step);
+      follow(d);
+    }
+    frame = requestAnimationFrame(edgeScroll);
+  };
+
+  const lift = (d: Drag): void => {
+    window.clearTimeout(d.timer);
+    d.lifted = true;
+    d.card.classList.add('is-lifted');
+    sheet.classList.add('is-dragging');
+    on.lift(d.from);
+    follow(d);
+    frame = requestAnimationFrame(edgeScroll);
+  };
+
+  const end = (dropped: boolean): void => {
+    const d = drag;
+    if (!d) return;
+    drag = null;
+    window.clearTimeout(d.timer);
+    cancelAnimationFrame(frame);
+    if (d.card.hasPointerCapture(d.pointerId)) d.card.releasePointerCapture(d.pointerId);
+    if (!d.lifted) return;
+    d.target?.classList.remove('is-drop-target');
+    d.card.classList.remove('is-lifted');
+    sheet.classList.remove('is-dragging');
+    d.card.style.transform = '';
+    // A long press let go where it started was a slow tap: its click goes through.
+    const still = Math.hypot(d.clientX - d.x, d.clientY - d.y) <= DRAG_THRESHOLD_PX;
+    if (dropped && still) return;
+    // Otherwise the click that follows the release must not count as a tap.
+    swallowClick = true;
+    window.setTimeout(() => (swallowClick = false), 0);
+    if (dropped && d.target) on.drop(d.from, slotOf(d.target));
+    else on.cancel(d.from);
+  };
+
+  const down = (e: PointerEvent): void => {
+    const card = (e.target as Element).closest<HTMLElement>('.squad-card[data-slot]');
+    if (drag || !card || !e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const d: Drag = {
+      pointerId: e.pointerId,
+      card,
+      from: slotOf(card),
+      x: e.clientX,
+      y: e.clientY,
+      scrollY: window.scrollY,
+      lifted: false,
+      target: null,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      timer: 0,
+    };
+    if (e.pointerType === 'touch')
+      d.timer = window.setTimeout(() => {
+        lift(d);
+      }, LONG_PRESS_MS);
+    card.setPointerCapture(e.pointerId);
+    drag = d;
+  };
+
+  const move = (e: PointerEvent): void => {
+    const d = drag;
+    if (d?.pointerId !== e.pointerId) return;
+    d.clientX = e.clientX;
+    d.clientY = e.clientY;
+    if (d.lifted) follow(d);
+    else if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > DRAG_THRESHOLD_PX) lift(d);
+  };
+
+  const up = (e: PointerEvent): void => {
+    if (drag?.pointerId === e.pointerId) end(true);
+  };
+  const lost = (e: PointerEvent): void => {
+    if (drag?.pointerId === e.pointerId) end(false);
+  };
+  const key = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || !drag?.lifted) return;
+    e.preventDefault();
+    end(false);
+  };
+  // Once a card is lifted on touch, the finger moves it rather than the page.
+  const touchMove = (e: TouchEvent): void => {
+    if (drag?.lifted && e.cancelable) e.preventDefault();
+  };
+  const menu = (e: Event): void => {
+    if (drag) e.preventDefault();
+  };
+  const click = (e: MouseEvent): void => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  sheet.addEventListener('pointerdown', down);
+  sheet.addEventListener('pointermove', move);
+  sheet.addEventListener('pointerup', up);
+  sheet.addEventListener('pointercancel', lost);
+  sheet.addEventListener('lostpointercapture', lost);
+  sheet.addEventListener('touchmove', touchMove, { passive: false });
+  sheet.addEventListener('contextmenu', menu);
+  sheet.addEventListener('click', click, true);
+  document.addEventListener('keydown', key);
+  return () => {
+    end(false);
+    document.removeEventListener('keydown', key);
+  };
+}
+
 const faceSide = (house: House, sway: number, you: boolean): HTMLElement =>
   h(
     'div',
@@ -341,6 +613,8 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
   const body = h('div', { class: 'manager-body' });
   const fx = h('div', { class: 'fx cup-fx', attrs: { 'aria-hidden': 'true' } });
   const timers: number[] = [];
+  /** Listeners a view adds outside its own elements, removed when the view changes. */
+  const cleanups: (() => void)[] = [];
   let frame = 0;
 
   const later = (ms: number, run: () => void): void => {
@@ -351,6 +625,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
     cancelAnimationFrame(frame);
     for (const timer of timers) window.clearTimeout(timer);
     timers.length = 0;
+    for (const cleanup of cleanups.splice(0)) cleanup();
   };
 
   const show = (...children: HTMLElement[]): void => {
@@ -482,7 +757,11 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
       }),
     );
 
-    show(h('div', { class: 'md-hub' }, next, mine), leagueTable(league, { title: 'League table' }));
+    show(
+      h('div', { class: 'md-hub' }, next, mine),
+      leagueTable(league, { title: 'League table' }),
+      scorersPanel(season, { title: 'Top scorers', limit: SCORERS_ON_HUB, boot: false }),
+    );
   }
 
   function squad(season: SeasonState): void {
@@ -502,6 +781,12 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
     const slotName = (slot: number): string =>
       slot < STARTERS ? ROLE_NAMES[ROLES[slot] ?? 'mid'] : 'on the bench';
 
+    const swap = (from: number, to: number): void => {
+      [order[from], order[to]] = [order[to] ?? '', order[from] ?? ''];
+      picked = null;
+      live.textContent = `${nameAt(to)} now ${slotName(to)}, ${nameAt(from)} ${slotName(from)}.`;
+    };
+
     const tap = (slot: number): void => {
       if (picked === null) {
         picked = slot;
@@ -509,14 +794,29 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
       } else if (picked === slot) {
         picked = null;
         live.textContent = 'Swap cancelled.';
-      } else {
-        const from = picked;
-        [order[from], order[slot]] = [order[slot] ?? '', order[from] ?? ''];
-        picked = null;
-        live.textContent = `${nameAt(slot)} now ${slotName(slot)}, ${nameAt(from)} ${slotName(from)}.`;
-      }
+      } else swap(picked, slot);
       drawSheet(slot);
     };
+
+    cleanups.push(
+      dragToSwap(sheet, {
+        lift(slot) {
+          // A drag replaces any half-made tap swap.
+          if (picked !== null) {
+            picked = null;
+            sheet.querySelector('[aria-pressed="true"]')?.setAttribute('aria-pressed', 'false');
+          }
+          live.textContent = `Moving ${nameAt(slot)}. Drop on another knight to swap.`;
+        },
+        drop(from, to) {
+          swap(from, to);
+          drawSheet(null);
+        },
+        cancel() {
+          live.textContent = 'Swap cancelled.';
+        },
+      }),
+    );
 
     const card = (slot: number): HTMLElement | null => {
       const knight = knights.get(order[slot] ?? '');
@@ -618,7 +918,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
         h(
           'p',
           { class: 'hint squad-hint' },
-          'Tap a knight, then another, to swap them: between roles, or in and out of the side. Tired knights are slower; a match on the bench brings them back.',
+          'Drag a knight onto another to swap them, or tap one and then the other: between roles, or in and out of the side. Tired knights are slower; a match on the bench brings them back.',
         ),
         sheet,
         live,
@@ -698,7 +998,14 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
           const latest = app.season;
           if (!latest) return;
           const [left, right] = runner.state.score;
-          app.setSeason(plan.finish(latest, { score: [left, right], steps: runner.step, timeline: [] }));
+          app.setSeason(
+            plan.finish(latest, {
+              score: [left, right],
+              steps: runner.step,
+              timeline: [],
+              goals: runner.goals,
+            }),
+          );
           refresh(fixture);
           playNext();
         });
@@ -747,6 +1054,10 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
         app.go('draft');
       }),
     );
+    const bootPanel = scorersPanel(season, { title: 'Top scorers', limit: SCORERS_AT_END, boot: true });
+    const boot = goldenBoot(season);
+    const bootLine = (): HTMLElement | null =>
+      boot ? h('p', { class: 'md-boot' }, icon('ball'), h('span', { text: boot })) : null;
 
     if (won && first && second) {
       const wins = app.honours.leagueWins;
@@ -781,9 +1092,11 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
             icon('cup'),
             wins <= 1 ? 'Your first league title' : `League titles: ${wins}`,
           ),
+          bootLine(),
           actions,
         ),
         leagueTable(league, { title: 'Final table' }),
+        bootPanel,
       );
       celebrate(house);
       return;
@@ -803,9 +1116,11 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
             class: 'cup-level',
             text: `${winner.name} are champions on ${pts(first.points)}. House ${house.name} took ${pts(mine.points)}.`,
           }),
+        bootLine(),
         actions,
       ),
       leagueTable(league, { title: 'Final table' }),
+      bootPanel,
     );
   }
 
