@@ -22,7 +22,7 @@ import { autoDraft, draftKnight, isPlayersPick, type SeasonState } from '../../m
 import { SQUAD_SIZE, type SquadKnight } from '../../modes/manager/types';
 import { houseById, REALM_HOUSES, type House } from '../../setup/houses';
 import { choice } from '../choice';
-import { button, h } from '../dom';
+import { button, h, svg } from '../dom';
 import { blockColour, crest, houseShield } from '../heraldry';
 import { reducedMotion } from '../motion';
 import { drawPortrait } from '../portrait';
@@ -50,6 +50,17 @@ const tierName = (tier: number): string => skillFor(tier).name;
 const buildName = (knight: SquadKnight): string => option(BUILDS, knight.look.build).name;
 const points = (n: number): string => `${n} ${n === 1 ? 'point' : 'points'}`;
 const youTag = (): HTMLElement => h('small', { class: 'you-tag', text: 'Your knight' });
+/** A gold helm on a rival's shield: your knight plays there, without crowding out the house name. */
+const forgedBadge = (name: string): HTMLElement => {
+  const label = `Your knight, ${name}, is in this squad`;
+  return h(
+    'span',
+    { class: 'forged-badge', attrs: { role: 'img', 'aria-label': label, title: label } },
+    svg(
+      '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M3 9a5 5 0 0 1 10 0v4.5H3zM5 8.5h6V10H5z"/></svg>',
+    ),
+  );
+};
 const starsOf = (tier: number): HTMLElement =>
   h('span', { class: 'stars', text: stars(tier), attrs: { 'aria-hidden': 'true' } });
 
@@ -528,12 +539,16 @@ export function mountDraft(root: HTMLElement, app: AppContext): () => void {
       h(
         'summary',
         { attrs: { 'data-focus': `rival-${id}` } },
-        houseShield(house),
+        h(
+          'span',
+          { class: 'rival-arms' },
+          houseShield(house),
+          squad.some((k) => k.forged) && forgedBadge(view.forged.name),
+        ),
         h('span', { class: 'rival-name', text: house.name }),
-        squad.some((k) => k.forged) && youTag(),
         h('span', {
           class: 'rival-count',
-          text: `${squad.length}/${SQUAD_SIZE} · ${BUDGET - spent} pts left`,
+          text: `${squad.length}/${SQUAD_SIZE} · ${BUDGET - spent} ${BUDGET - spent === 1 ? 'pt' : 'pts'} left`,
         }),
       ),
       h(
@@ -544,10 +559,8 @@ export function mountDraft(root: HTMLElement, app: AppContext): () => void {
               h(
                 'li',
                 {},
-                h('b', { text: k.look.name }),
-                starsOf(k.tier),
-                `${tierName(k.tier)} · ${buildName(k)}`,
-                k.forged && youTag(),
+                h('span', { class: 'rival-who' }, h('b', { text: k.look.name }), k.forged && youTag()),
+                h('span', { class: 'rival-meta' }, starsOf(k.tier), `${tierName(k.tier)} · ${buildName(k)}`),
               ),
             )
           : [h('li', { class: 'is-empty', text: 'No picks yet' })]),

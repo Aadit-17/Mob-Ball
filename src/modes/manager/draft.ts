@@ -11,20 +11,34 @@ import { HOUSE_STYLES, SQUAD_SIZE, STARTERS, type HouseStyle, type SquadKnight }
 
 export type DraftStyle = HouseStyle['draft'];
 
-/** Points a knight costs by tier, Peasant to Legend. Tuned with the draft sim. */
-export const TIER_COST: readonly number[] = [1, 2, 4, 7, 11];
-/** Points each house has for its whole squad. */
-export const BUDGET = 24;
+/**
+ * Points a knight costs by level, tuned with the draft sim (see the value model below). A refit on 16000
+ * matches puts a Knight only 0.07 ± 0.04 goals above a Squire, so it costs one point more, not two.
+ */
+export const PEASANT_COST = 1;
+export const SQUIRE_COST = 2;
+export const KNIGHT_COST = 3;
+export const CHAMPION_COST = 6;
+export const LEGEND_COST = 11;
+export const TIER_COST: readonly number[] = [
+  PEASANT_COST,
+  SQUIRE_COST,
+  KNIGHT_COST,
+  CHAMPION_COST,
+  LEGEND_COST,
+];
+/** Points each house has for its whole squad: exactly two Legends and four Peasants, the boldest squad allowed. */
+export const BUDGET = 2 * LEGEND_COST + (SQUAD_SIZE - 2) * PEASANT_COST;
 export const DRAFT_HOUSES: readonly string[] = REALM_HOUSES.map((h) => h.id);
 export const TOTAL_PICKS = DRAFT_HOUSES.length * SQUAD_SIZE;
 export const FORGED_ID = 'forged';
 export const FORGED_TIER = 2;
 
 /**
- * How many of the 60 knights (besides the forged one) land on each tier, Peasant to Legend. Five Legends
- * and nine Champions for eight houses make the top a race; 30 Peasants and Squires keep everyone solvent.
+ * How many of the 80 knights (besides the forged one) land on each tier, Peasant to Legend. Twelve Legends
+ * and sixteen Champions let every house reach for the top; the sim leaves some of every tier undrafted.
  */
-export const POOL_TIERS: readonly number[] = [14, 16, 16, 9, 5];
+export const POOL_TIERS: readonly number[] = [16, 22, 12, 18, 12];
 
 const ROSTER_ROLES = ROLES_BY_SIZE[4];
 const ROSTER_SIZE = REALM_HOUSES.length * ROSTER_ROLES.length;
@@ -66,6 +80,42 @@ const PROSPECT_NAMES = [
   'Edith Stout',
   'Ser Hector',
   'Rhosyn',
+  'Ser Aymer',
+  'Lady Beatrix',
+  'Ser Clement',
+  'Dulcie Marsh',
+  'Ser Eustace',
+  'Fenna',
+  'Ser Geoffrey',
+  'Hawise',
+  'Ser Humphrey',
+  'Idony',
+  'Ser Jocelyn',
+  'Kenric',
+  'Ser Leofric',
+  'Lady Melisende',
+  'Ser Nigel',
+  'Osanna',
+  'Ser Piers',
+  'Rohese',
+  'Ser Simund',
+  'Tib Crookleg',
+  'Ser Turold',
+  'Ulfa',
+  'Ser Walter',
+  'Wymarc',
+  'Brother Silas',
+  'Goody Pruett',
+  'Ser Amis',
+  'Lady Constance',
+  'Hamund Reed',
+  'Ser Gilbert',
+  'Elfleda',
+  'Ser Roland',
+  'Agatha Hale',
+  'Ser Brice',
+  'Nell Cooper',
+  'Ser Drogo',
 ] as const;
 
 export interface DraftState {
@@ -315,8 +365,9 @@ export function applyPick(draft: DraftState, house: string, knightId: string): D
 
 // Value model ---------------------------------------------------------------------------------
 // Checked in scripts/draft.sim.ts (bench rotated as in a league, 120 drafts, ± 2 SE): managed drafts beat
-// random legal drafts 66.4% ± 2.0%; balanced v depth 50.8% ± 3.4%, balanced v stars 51.2% ± 2.4%,
-// stars v depth 55.6% ± 3.5%. With the knights measured one at a time instead, Squires looked 0.3 worse.
+// random legal drafts 62.2% ± 2.0%; balanced v depth 51.5% ± 3.1%, balanced v stars 46.2% ± 3.0%,
+// depth v stars 49.0% ± 3.2%. Undrafted per draft, Peasant to Legend: 6.5 8.9 7.8 4.4 5.5 of 16 22 12 18 12.
+// With the knights measured one at a time instead, Squires looked 0.3 worse.
 
 /**
  * Goal difference per match against an all-Knight side, fitted on 8000 matches between random line-ups

@@ -11,6 +11,7 @@ import type { Role } from '../src/game/types';
 import { DEFAULT_LOOK } from '../src/knight/look';
 import {
   applyPick,
+  availableKnights,
   chooseDraftPick,
   defaultLineup,
   houseOnTheClock,
@@ -250,12 +251,14 @@ it(
     // Every draft deals the three styles to houses afresh, then plays a full round robin.
     const pairs = new Map<string, number[]>();
     const tiers = new Map<DraftStyle, number[][]>(STYLES.map((s) => [s, []]));
+    const undrafted = [0, 0, 0, 0, 0];
     for (let d = 0; d < DRAFTS; d++) {
       const seed = 5000 + d;
       const order = startDraft(seed, 'ember', DEFAULT_LOOK).order;
       const dealt = createRng(seed).shuffle(order.map((_, i) => STYLES[i % STYLES.length] ?? 'balanced'));
       const styleOf = (house: string): DraftStyle => dealt[order.indexOf(house)] ?? 'balanced';
       const draft = runDraft(seed, (house) => managed(styleOf(house)));
+      for (const k of availableKnights(draft)) undrafted[k.tier] = (undrafted[k.tier] ?? 0) + 1;
       for (const house of order)
         tiers.get(styleOf(house))?.push(
           squadOf(draft, house)
@@ -284,6 +287,9 @@ it(
         (squads.reduce((s, sq) => s + (sq[i] ?? 0), 0) / squads.length).toFixed(2);
       console.log(`${style.padEnd(9)} mean tiers, best first: ${[0, 1, 2, 3, 4, 5].map(mean).join(' ')}`);
     }
+    // A tier nobody leaves behind is underpriced; one mostly left behind is overpriced.
+    const perDraft = undrafted.map((n) => (n / DRAFTS).toFixed(1)).join(' ');
+    console.log(`undrafted per draft, Peasant to Legend: ${perDraft}`);
   },
   LIMIT,
 );

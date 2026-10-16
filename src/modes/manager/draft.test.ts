@@ -68,12 +68,13 @@ describe('draftPool', () => {
   const pool = draftPool(7, FORGED);
 
   it('holds every roster knight with their own face, the generated knights and the forged knight', () => {
-    expect(pool).toHaveLength(POOL_TIERS.reduce((s, n) => s + n, 0) + 1);
+    expect(POOL_TIERS.reduce((s, n) => s + n, 0)).toBe(80);
+    expect(pool).toHaveLength(81);
     expect(new Set(pool.map((k) => k.id)).size).toBe(pool.length);
     for (const house of REALM_HOUSES)
       for (const [role, look] of Object.entries(roster(house)))
         expect(pool.find((k) => k.id === `roster:${house.id}:${role}`)?.look).toEqual(look);
-    expect(pool.filter((k) => k.id.startsWith('gen:'))).toHaveLength(28);
+    expect(pool.filter((k) => k.id.startsWith('gen:'))).toHaveLength(48);
     expect(pool[0]).toEqual({ id: FORGED_ID, look: FORGED, tier: 2, forged: true });
     expect(pool.filter((k) => k.forged)).toHaveLength(1);
   });
@@ -82,6 +83,13 @@ describe('draftPool', () => {
     expect(new Set(pool.map((k) => k.look.name)).size).toBe(pool.length);
     const namesake = draftPool(7, { ...FORGED, name: 'Ser Aldous' });
     expect(new Set(namesake.map((k) => k.look.name)).size).toBe(namesake.length);
+  });
+
+  it('has more Legends and Champions than houses, so a house saving for the top still finds one', () => {
+    const [legends, champions] = [POOL_TIERS[4] ?? 0, POOL_TIERS[3] ?? 0];
+    expect(legends).toBeGreaterThanOrEqual(12);
+    expect(champions).toBeGreaterThanOrEqual(16);
+    expect(pool.filter((k) => k.tier === 4)).toHaveLength(legends);
   });
 
   it('deals the tiers in the stated distribution, differently each season', () => {
@@ -134,43 +142,49 @@ describe('checkPick and applyPick', () => {
     expect(checkPick(done, first, 'gen:1')).toEqual({ ok: false, problem: 'complete' });
   });
 
-  it('keeps enough points back to fill the squad (the reserve rule)', () => {
-    // The house picking last in round one takes a Legend and then a Champion: 18 of 24 points for 2 knights.
+  it('costs rise with every level, and the budget is exactly two Legends and four Peasants', () => {
+    TIER_COST.slice(1).forEach((c, i) => {
+      expect(c).toBeGreaterThan(TIER_COST[i] ?? Infinity);
+    });
+    expect(BUDGET).toBe(2 * (TIER_COST[4] ?? 0) + (SQUAD_SIZE - 2) * (TIER_COST[0] ?? 0));
+  });
+
+  it('lets a house draft two Legends, then keeps enough back for four Peasants (the reserve rule)', () => {
+    // The house picking last in round one takes two Legends running: 22 of 26 points for 2 knights.
     let draft = start();
     const last = draft.order[7] ?? '';
     draft = play(draft, cheapest, 7);
     draft = applyPick(draft, last, knightOf(draft, 4).id);
-    draft = applyPick(draft, last, knightOf(draft, 3).id);
+    draft = applyPick(draft, last, knightOf(draft, 4).id);
     draft = play(draft, cheapest, 14);
     expect(houseOnTheClock(draft)).toBe(last);
-    expect(budgetLeft(draft, last)).toBe(6);
-    // 6 points for 4 knights: a Knight (4) would leave 2 for 3, so it is refused; a Squire is fine.
-    expect(checkPick(draft, last, knightOf(draft, 2).id)).toEqual({ ok: false, problem: 'own-reserve' });
+    expect(budgetLeft(draft, last)).toBe(4);
+    // 4 points for 4 knights: a Squire (2) would leave 2 for 3, so it is refused; a Peasant is fine.
+    expect(checkPick(draft, last, knightOf(draft, 1).id)).toEqual({ ok: false, problem: 'own-reserve' });
     expect(checkPick(draft, last, knightOf(draft, 3).id)).toEqual({ ok: false, problem: 'over-budget' });
-    expect(checkPick(draft, last, knightOf(draft, 1).id)).toEqual({ ok: true });
+    expect(checkPick(draft, last, knightOf(draft, 0).id)).toEqual({ ok: true });
+    draft = play(draft, cheapest);
+    expect(squadOf(draft, last).map((k) => k.tier)).toEqual([4, 4, 0, 0, 0, 0]);
+    expect(budgetLeft(draft, last)).toBe(0);
   });
 
   it('refuses a pick that would strand another house, even when the picker could afford it', () => {
-    // Search random legal drafts for a refusal that only the other houses' needs explain.
-    const found = Array.from({ length: 40 }, (_, seed) => seed).some((seed) => {
-      let draft = start(seed);
-      const drafter = randomDrafter(seed);
-      while (!isDraftComplete(draft)) {
-        const house = houseOnTheClock(draft) ?? '';
-        const stranding = availableKnights(draft).find((k) => {
-          const check = checkPick(draft, house, k.id);
-          return !check.ok && check.problem === 'rival-reserve';
-        });
-        if (stranding) {
-          expect(budgetLeft(draft, house)).toBeGreaterThanOrEqual(TIER_COST[stranding.tier] ?? Infinity);
-          expect(legalPicks(draft).some((k) => k.id === stranding.id)).toBe(false);
-          return true;
-        }
-        draft = applyPick(draft, house, drafter(draft));
-      }
-      return false;
-    });
-    expect(found).toBe(true);
+    // Four houses take two Legends each, so they need all 16 Peasants; the other four take Squires.
+    let draft = start();
+    const needy = draft.order.slice(0, 4);
+    const pickFor = (d: DraftState): string =>
+      knightOf(d, needy.includes(houseOnTheClock(d) ?? '') ? 4 : 1).id;
+    draft = play(draft, pickFor, 16);
+    expect(availableKnights(draft).filter((k) => k.tier === 0)).toHaveLength(16);
+    for (const house of needy) expect(budgetLeft(draft, house)).toBe(4);
+    draft = play(draft, (d) => knightOf(d, 0).id, 4);
+    // Round three reaches a house with points to spare: one more Peasant would leave 11 for 12 places.
+    const rich = houseOnTheClock(draft) ?? '';
+    expect(needy).not.toContain(rich);
+    expect(budgetLeft(draft, rich)).toBeGreaterThan(20);
+    expect(checkPick(draft, rich, knightOf(draft, 0).id)).toEqual({ ok: false, problem: 'rival-reserve' });
+    expect(legalPicks(draft).some((k) => k.tier === 0)).toBe(false);
+    expect(checkPick(draft, rich, knightOf(draft, 1).id)).toEqual({ ok: true });
   });
 
   it('never leaves a house stuck: random legal drafts always finish with full squads within budget', () => {
@@ -201,6 +215,16 @@ describe('the forged knight', () => {
       return draft.order.find((h) => squadOf(draft, h).some((k) => k.forged));
     });
     expect(takers.some((h) => h !== undefined && h !== 'thorn')).toBe(true);
+  });
+});
+
+describe('the pool after a managed draft', () => {
+  it('still has knights of every level left, so even the last picks are a choice', () => {
+    for (const seed of [1, 2, 3, 4]) {
+      const left = availableKnights(play(start(seed), managed));
+      for (let tier = 0; tier < TIER_COST.length; tier++)
+        expect(left.filter((k) => k.tier === tier).length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -238,19 +262,19 @@ describe('rival managers', () => {
     expect(mean(() => managed)).toBeGreaterThan(mean(randomDrafter) + 0.5);
   });
 
-  it('follow their style: stars buy more Legends, depth spreads points over more mid-tier knights', () => {
+  it('follow their style: stars buy more Champions and Legends, depth spreads points over mid-tier knights', () => {
     const tally = (style: DraftStyle) => {
       const squads = [1, 2, 3, 4, 5, 6].flatMap((seed) => {
         const draft = play(start(seed), (d) => chooseDraftPick(d, style));
         return draft.order.map((h) => squadOf(draft, h));
       });
       return {
-        legends: squads.flat().filter((k) => k.tier === 4).length,
+        top: squads.flat().filter((k) => k.tier >= 3).length,
         middle: squads.flat().filter((k) => k.tier === 1 || k.tier === 2).length,
       };
     };
     const [stars, depth] = [tally('stars'), tally('depth')];
-    expect(stars.legends).toBeGreaterThan(depth.legends);
+    expect(stars.top).toBeGreaterThan(depth.top);
     expect(depth.middle).toBeGreaterThan(stars.middle);
   });
 });
@@ -324,18 +348,19 @@ describe('normalizeDraft', () => {
     const base = roundTrip(partial);
     expect(normalizeDraft({ ...base, picks: [...partial.picks, partial.picks[0]] })).toBeNull();
     expect(normalizeDraft({ ...base, picks: [...partial.picks, 'gen:999'] })).toBeNull();
-    // The last house in round one picks twice running: two Legends leave 2 points for 4 knights.
+    // The last house in round one takes two Legends running, leaving 4 points: only Peasants from then on.
     const draft = start(9);
     const pool = draftPool(9, FORGED);
-    const peasants = pool
-      .filter((k) => k.tier === 0)
-      .slice(0, 7)
-      .map((k) => k.id);
-    const legends = pool
-      .filter((k) => k.tier === 4)
-      .slice(0, 2)
-      .map((k) => k.id);
-    expect(normalizeDraft({ ...roundTrip(draft), picks: [...peasants, legends[0]] })).not.toBeNull();
-    expect(normalizeDraft({ ...roundTrip(draft), picks: [...peasants, ...legends] })).toBeNull();
+    const ids = (tier: number, n: number): string[] =>
+      pool
+        .filter((k) => k.tier === tier && !k.forged)
+        .slice(0, n)
+        .map((k) => k.id);
+    const legends = ids(4, 2);
+    // Seven Squires before them, then fourteen Squires and a Knight until the last house is next on the clock.
+    const squires = ids(1, 20);
+    const picks = [...squires.slice(0, 7), ...legends, ...squires.slice(7), ...ids(2, 1)];
+    expect(normalizeDraft({ ...roundTrip(draft), picks: [...picks, ...ids(0, 1)] })).not.toBeNull();
+    expect(normalizeDraft({ ...roundTrip(draft), picks: [...picks, ...ids(2, 2).slice(1)] })).toBeNull();
   });
 });
