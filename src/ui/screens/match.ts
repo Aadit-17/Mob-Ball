@@ -319,14 +319,6 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         },
       ),
       choice(
-        'Line',
-        [level('Deep', 'deep'), level('Normal', 'normal'), level('High', 'high')],
-        tactics.line,
-        (v) => {
-          plan({ line: v });
-        },
-      ),
-      choice(
         'Shooting',
         [level('Patient', 'patient'), level('Normal', 'normal'), level('Early', 'early')],
         tactics.shooting,

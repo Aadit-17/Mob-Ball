@@ -163,9 +163,9 @@ export function chooseLineup(
 }
 
 /** All in when chasing the game late: press high, push up, shoot on sight. */
-export const CHARGE: Tactics = { press: 'high', line: 'high', shooting: 'early' };
+export const CHARGE: Tactics = { press: 'high', shooting: 'early' };
 /** Seeing it out: sit deep, press only in our half, keep the ball until the chance is clear. */
-export const HOLD: Tactics = { press: 'low', line: 'deep', shooting: 'patient' };
+export const HOLD: Tactics = { press: 'low', shooting: 'patient' };
 
 /** The second-half point a rival makes his substitution, or half-time when behind. */
 export const SUB_AT = 2 / 3;
@@ -214,8 +214,7 @@ export function rivalTactics(style: HouseStyle, gone: number, lead: number): Tac
   return lead < 0 ? CHARGE : HOLD;
 }
 
-const sameTactics = (a: Tactics, b: Tactics): boolean =>
-  a.press === b.press && a.line === b.line && a.shooting === b.shooting;
+const sameTactics = (a: Tactics, b: Tactics): boolean => a.press === b.press && a.shooting === b.shooting;
 
 interface OnPitch {
   readonly id: number;

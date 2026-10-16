@@ -279,19 +279,16 @@ export function otherFixtures(season: SeasonState): LeagueFixture[] {
 
 const TACTIC_VALUES = {
   press: ['low', 'mid', 'high'],
-  line: ['deep', 'normal', 'high'],
   shooting: ['patient', 'normal', 'early'],
 } as const;
 
 function normalizeTactics(raw: unknown): Tactics | null {
   if (typeof raw !== 'object' || raw === null) return null;
-  const { press, line, shooting } = raw as Record<string, unknown>;
+  const { press, shooting } = raw as Record<string, unknown>;
   const isOne = <T extends string>(options: readonly T[], value: unknown): value is T =>
     typeof value === 'string' && (options as readonly string[]).includes(value);
-  return isOne(TACTIC_VALUES.press, press) &&
-    isOne(TACTIC_VALUES.line, line) &&
-    isOne(TACTIC_VALUES.shooting, shooting)
-    ? { press, line, shooting }
+  return isOne(TACTIC_VALUES.press, press) && isOne(TACTIC_VALUES.shooting, shooting)
+    ? { press, shooting }
     : null;
 }
 

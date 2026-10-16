@@ -15,8 +15,8 @@ import { setTeamTier } from '../src/setup/squads';
 
 /** Seeds per cell; each is played twice with the sides swapped, so 200 matches and no side bias. */
 const CELL_SEEDS = 100;
-/** The round robin of all 27 combinations has 351 pairings, so each gets fewer seeds. */
-const ROUND_ROBIN_SEEDS = 20;
+/** The round robin of all 9 combinations has 36 pairings, so each can have a full cell of seeds. */
+const ROUND_ROBIN_SEEDS = CELL_SEEDS;
 const ROUND_ROBIN_TIER = 3;
 const TIERS_UNDER_TEST = [2, 3, 4] as const;
 const FIRST_SEED = 5000;
@@ -168,26 +168,22 @@ async function playAll(jobs: readonly Job[]): Promise<Line[][]> {
 
 // ------------------------------------------------------------------ the tactics under test
 
-/** Default, then each option of each lever with the other two at default, then the touchline presets. */
+/** Default, then each option of each lever with the other at default, then the touchline presets. */
 const ENTRIES: readonly (readonly [string, Tactics])[] = [
   ['default', DEFAULT_TACTICS],
   ['press low', { ...DEFAULT_TACTICS, press: 'low' }],
   ['press high', { ...DEFAULT_TACTICS, press: 'high' }],
-  ['line deep', { ...DEFAULT_TACTICS, line: 'deep' }],
-  ['line high', { ...DEFAULT_TACTICS, line: 'high' }],
   ['shoot patient', { ...DEFAULT_TACTICS, shooting: 'patient' }],
   ['shoot early', { ...DEFAULT_TACTICS, shooting: 'early' }],
-  ['Charge', { press: 'high', line: 'high', shooting: 'early' }],
-  ['Hold', { press: 'low', line: 'deep', shooting: 'patient' }],
+  ['Charge', { press: 'high', shooting: 'early' }],
+  ['Hold', { press: 'low', shooting: 'patient' }],
 ];
 
 const COMBINATIONS: readonly Tactics[] = (['low', 'mid', 'high'] as const).flatMap((press) =>
-  (['deep', 'normal', 'high'] as const).flatMap((line) =>
-    (['patient', 'normal', 'early'] as const).map((shooting) => ({ press, line, shooting })),
-  ),
+  (['patient', 'normal', 'early'] as const).map((shooting) => ({ press, shooting })),
 );
 
-const tacticsName = (t: Tactics): string => `${t.press} press · ${t.line} line · ${t.shooting} shooting`;
+const tacticsName = (t: Tactics): string => `${t.press} press · ${t.shooting} shooting`;
 
 interface Pairing {
   readonly i: number;

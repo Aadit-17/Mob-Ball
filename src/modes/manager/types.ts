@@ -21,14 +21,14 @@ export interface HouseStyle {
 }
 
 export const HOUSE_STYLES: Readonly<Record<string, HouseStyle>> = {
-  ember: { draft: 'stars', tactics: { press: 'high', line: 'high', shooting: 'early' } },
-  corvane: { draft: 'balanced', tactics: { press: 'mid', line: 'deep', shooting: 'patient' } },
-  thorn: { draft: 'depth', tactics: { press: 'mid', line: 'normal', shooting: 'normal' } },
-  grey: { draft: 'balanced', tactics: { press: 'low', line: 'deep', shooting: 'normal' } },
-  mud: { draft: 'depth', tactics: { press: 'high', line: 'normal', shooting: 'early' } },
-  hollow: { draft: 'stars', tactics: { press: 'mid', line: 'normal', shooting: 'patient' } },
-  ox: { draft: 'balanced', tactics: { press: 'high', line: 'high', shooting: 'normal' } },
-  salt: { draft: 'depth', tactics: { press: 'low', line: 'normal', shooting: 'patient' } },
+  ember: { draft: 'stars', tactics: { press: 'high', shooting: 'early' } },
+  corvane: { draft: 'balanced', tactics: { press: 'mid', shooting: 'patient' } },
+  thorn: { draft: 'depth', tactics: { press: 'mid', shooting: 'normal' } },
+  grey: { draft: 'balanced', tactics: { press: 'low', shooting: 'normal' } },
+  mud: { draft: 'depth', tactics: { press: 'high', shooting: 'early' } },
+  hollow: { draft: 'stars', tactics: { press: 'mid', shooting: 'patient' } },
+  ox: { draft: 'balanced', tactics: { press: 'high', shooting: 'normal' } },
+  salt: { draft: 'depth', tactics: { press: 'low', shooting: 'patient' } },
 };
 
 export const SQUAD_SIZE = 6;

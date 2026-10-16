@@ -314,7 +314,7 @@ describe('chooseLineup', () => {
 });
 
 describe('rivalTactics', () => {
-  const style: HouseStyle = { draft: 'depth', tactics: { press: 'mid', line: 'deep', shooting: 'patient' } };
+  const style: HouseStyle = { draft: 'depth', tactics: { press: 'mid', shooting: 'patient' } };
 
   it('plays the house’s own way until late, then charges when behind and holds when ahead', () => {
     expect(rivalTactics(style, LATE - 0.01, -1)).toBe(style.tactics);
@@ -324,8 +324,8 @@ describe('rivalTactics', () => {
   });
 
   it('gives Charge and Hold the opposite levers', () => {
-    expect(CHARGE).toEqual({ press: 'high', line: 'high', shooting: 'early' });
-    expect(HOLD).toEqual({ press: 'low', line: 'deep', shooting: 'patient' });
+    expect(CHARGE).toEqual({ press: 'high', shooting: 'early' });
+    expect(HOLD).toEqual({ press: 'low', shooting: 'patient' });
   });
 });
 

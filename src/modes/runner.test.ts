@@ -12,7 +12,7 @@ const config: FixtureConfig = {
   away: setTeamTier(rosterLineup(houseById('salt'), 4), 3),
   seed: 21,
 };
-const CHARGE: Tactics = { press: 'high', line: 'high', shooting: 'early' };
+const CHARGE: Tactics = { press: 'high', shooting: 'early' };
 const bench = spec('mid', { tier: 4, speedFactor: 1 });
 
 /** Where the match ended up, precisely enough that any divergence shows. */

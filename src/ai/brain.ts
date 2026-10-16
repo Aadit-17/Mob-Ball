@@ -269,17 +269,10 @@ const OPEN_LANE_DANGER = 160;
 /** How far goal-side of the ball the midfielder screens, and how far ahead of it the forward waits. */
 const SCREEN_GAP = 110;
 
-/**
- * What the line tactic moves, in the positioning code's own units; `normal` holds the original values.
- * depth: how far behind the ball the defender holds the line. floor: the nearest it comes to goal.
- * screen: the midfielder's gap goal-side of the ball. support: the furthest the defender pushes up in
- * possession. roleDepth: added to the Squire's share of the pitch held behind the ball.
- */
-const LINES = {
-  deep: { depth: 270, floor: 110, screen: 80, support: PITCH.right - 420, roleDepth: -0.1 },
-  normal: { depth: 200, floor: 140, screen: SCREEN_GAP, support: PITCH.right - 320, roleDepth: 0 },
-  high: { depth: 130, floor: 200, screen: 150, support: PITCH.right - 230, roleDepth: 0.1 },
-} as const satisfies Record<Tactics['line'], object>;
+/** How far behind the ball the defender holds the line, unless an attacker has run in behind. */
+const LINE_DEPTH = 200;
+/** The nearest the defender's line comes to his own goal. */
+const LINE_FLOOR = 140;
 
 /** With a low press the nearest knight only steps out while the ball is this far into the rivals' half, at most. */
 const LOW_PRESS_REACH = 40;
@@ -373,27 +366,26 @@ function cover(ctx: Context): Plan | null {
 
 /** Squire positions: each role holds its own spot, shifted with the ball. */
 function roleSpot(ctx: Context): Plan {
-  const { ball, self, ours, tactics } = ctx;
+  const { ball, self, ours } = ctx;
   const y = PITCH.centerY + (ball.y - PITCH.centerY) * 0.55;
   if (self.role === 'fwd')
     return hold(clamp(ball.x + (ours ? 170 : 110), PITCH.left + 200, PITCH.right - 90), y);
-  const depth = (self.role === 'def' ? 0.45 : 0.7) + LINES[tactics.line].roleDepth;
+  const depth = self.role === 'def' ? 0.45 : 0.7;
   return hold(Math.min(PITCH.left + (ball.x - PITCH.left) * depth, PITCH.centerX - 50), y);
 }
 
 /** Out of possession, beyond the press and the cover: a compact block that moves with the ball and the runners. */
 function shape(ctx: Context): Plan {
   const { ball, me, self } = ctx;
-  const line = LINES[ctx.tactics.line];
   switch (self.role) {
     case 'def': {
       if (ball.x < me.x - 10) return carry(ctx);
       const deepest = track(ctx, attackers(ctx), (o) => -o.x);
       if (deepest && deepest.x < ball.x - IN_BEHIND) return at(toward(deepest, OWN_GOAL, MARK_GAP));
-      return at(toward(OWN_GOAL, ball, Math.max(line.floor, dist(OWN_GOAL, ball) - line.depth)));
+      return at(toward(OWN_GOAL, ball, Math.max(LINE_FLOOR, dist(OWN_GOAL, ball) - LINE_DEPTH)));
     }
     case 'mid':
-      return at(toward(ball, OWN_GOAL, line.screen));
+      return at(toward(ball, OWN_GOAL, SCREEN_GAP));
     default: {
       const outlet = track(ctx, attackers(ctx), (o) => o.x);
       if (outlet && outlet.x > ball.x) return at(toward(ball, outlet, dist(ball, outlet) * OUTLET_CUT));
@@ -405,11 +397,13 @@ function shape(ctx: Context): Plan {
 /** How far behind the ball the defender offers the pass back, angled toward the middle. */
 const SUPPORT_DEPTH = 170;
 const SUPPORT_ANGLE = 0.35;
+/** The defender never pushes past this, so a counter can't get in behind him. */
+const SUPPORT_MAX_X = PITCH.right - 320;
 
-/** The defender in possession: behind the ball for the pass back, between it and the middle, never so far up a counter gets in behind. */
-const supportAngle = ({ ball, tactics }: Context): Plan =>
+/** The defender in possession: behind the ball for the pass back, between it and the middle. */
+const supportAngle = ({ ball }: Context): Plan =>
   hold(
-    clamp(ball.x - SUPPORT_DEPTH, PITCH.left + 120, LINES[tactics.line].support),
+    clamp(ball.x - SUPPORT_DEPTH, PITCH.left + 120, SUPPORT_MAX_X),
     PITCH.centerY + (ball.y - PITCH.centerY) * SUPPORT_ANGLE,
   );
 
