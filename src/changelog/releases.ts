@@ -21,6 +21,34 @@ export interface Release {
 
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.3',
+    date: '2026-10-16',
+    title: 'The Realm Cup',
+    summary: 'Eight houses, one knockout and a trophy for whoever survives it.',
+    changes: [
+      {
+        kind: 'new',
+        text: 'The Realm Cup: an eight-house knockout. Win a quarter-final, a semi-final and the final to lift the cup. Rivals start a level below the one you pick and finish a level above it.',
+      },
+      {
+        kind: 'new',
+        text: 'Four new houses join the realm: Mudford, Hollowmere, Oxbridge and Saltcliff. Every house fields the same knights in every cup, so you get to know your rivals.',
+      },
+      {
+        kind: 'new',
+        text: 'The other ties play out across the realm while you watch the bracket, and your cup is saved so you can leave and pick it up later.',
+      },
+      {
+        kind: 'new',
+        text: 'Win the cup to earn a trophy on your shield and the title of Realm Cup champion.',
+      },
+      {
+        kind: 'improved',
+        text: 'Links to MOB BALL now show a proper preview with art and a description when shared, plus a new shield icon for your browser tab.',
+      },
+    ],
+  },
+  {
     version: '0.2',
     date: '2026-10-10',
     title: 'Torches lit',
