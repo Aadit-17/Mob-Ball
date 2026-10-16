@@ -16,6 +16,7 @@ import { MatchRenderer } from '../../render/renderer';
 import type { House } from '../../setup/houses';
 import { choice } from '../choice';
 import { button, h } from '../dom';
+import { dragToSwap } from '../drag';
 import { blockColour, crest, icon } from '../heraldry';
 import { lozengeBurst, reducedMotion } from '../motion';
 import { ROLE_NAMES } from './setup';
@@ -28,8 +29,6 @@ const MAX_FRAME = 0.05;
 const SPEEDS = [1, 2, 4] as const;
 /** The dugout lists the four on the pitch deepest first. */
 const ROLE_ORDER: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
-/** A press on a position only becomes a drag once the pointer has moved this far, so a tap stays a tap. */
-const DRAG_START = 6;
 
 /** Maps match time onto a football clock: a full match reads as 90 minutes. */
 const footballMinute = (elapsed: number, duration: number, golden: boolean): string =>
@@ -257,6 +256,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     } else {
       if (planned && planned !== runner.tacticsOf(0)) runner.act(0, { kind: 'tactics', tactics: planned });
       announceSwaps(sendSwaps());
+      releaseDrag();
       overlay.hidden = true;
     }
   };
@@ -312,6 +312,8 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     overlay.querySelector<HTMLElement>(`[data-knight="${String(k.id)}"]`)?.focus();
   }
 
+  let releaseDrag = (): void => undefined;
+
   function positions(dugout: Dugout): HTMLElement {
     const ours = byRole(state.knights.filter((k) => k.team === 0));
     const slots = ours.map((k) => {
@@ -331,22 +333,29 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         h('b', { text: name }),
       );
       slot.disabled = subbing !== null;
-      dragToSwap(slot, {
-        tap: () => {
-          tapPosition(k, dugout);
-        },
-        drop: (target) => {
-          const other = ours.find((o) => String(o.id) === target.dataset.knight);
-          if (other) swapPositions(k, other, dugout);
-        },
+      slot.addEventListener('click', () => {
+        tapPosition(k, dugout);
       });
       return slot;
+    });
+    const row = h('div', { class: 'pos-row', attrs: { role: 'group', 'aria-label': 'Positions' } }, ...slots);
+    const knightOf = (slot: HTMLElement): Knight | undefined =>
+      ours.find((o) => String(o.id) === slot.dataset.knight);
+    // The dugout is rebuilt on every change, so the previous row's drag listeners go with it.
+    releaseDrag();
+    releaseDrag = dragToSwap(row, '.pos-slot', {
+      lift: () => undefined,
+      drop: (from, to) => {
+        const [a, b] = [knightOf(from), knightOf(to)];
+        if (a && b) swapPositions(a, b, dugout);
+      },
+      cancel: () => undefined,
     });
     return h(
       'div',
       { class: 'choice pos-line' },
       h('b', {}, 'Positions', h('small', { text: subbing ? 'after the change' : 'drag to swap' })),
-      h('div', { class: 'pos-row', attrs: { role: 'group', 'aria-label': 'Positions' } }, ...slots),
+      row,
     );
   }
 
@@ -592,63 +601,8 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
 
   return () => {
     cancelAnimationFrame(frame);
+    releaseDrag();
     keyboard.dispose();
     sound.stopMatch();
   };
-}
-
-/**
- * Drag a position onto another to swap them. Pointer events with capture rather than HTML5 drag and
- * drop, which never fires on phones; a press that doesn't move is a tap (and Enter/Space a click).
- */
-function dragToSwap(
-  slot: HTMLButtonElement,
-  on: { tap: () => void; drop: (target: HTMLElement) => void },
-): void {
-  let start: { x: number; y: number } | null = null;
-  let over: HTMLElement | null = null;
-  let dragged = false;
-  const targetAt = (x: number, y: number): HTMLElement | null =>
-    document
-      .elementsFromPoint(x, y)
-      .map((el) => el.closest<HTMLElement>('.pos-slot'))
-      .find((el) => el !== null && el !== slot) ?? null;
-  const hover = (target: HTMLElement | null): void => {
-    over?.classList.remove('drop-target');
-    target?.classList.add('drop-target');
-    over = target;
-  };
-  const reset = (): void => {
-    hover(null);
-    start = null;
-    slot.classList.remove('dragging');
-    slot.style.transform = '';
-  };
-  slot.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || slot.disabled) return;
-    start = { x: e.clientX, y: e.clientY };
-    dragged = false;
-    slot.setPointerCapture(e.pointerId);
-  });
-  slot.addEventListener('pointermove', (e) => {
-    if (!start) return;
-    const [dx, dy] = [e.clientX - start.x, e.clientY - start.y];
-    if (!dragged && Math.hypot(dx, dy) < DRAG_START) return;
-    dragged = true;
-    slot.classList.add('dragging');
-    // Carried a little smaller, so the slot underneath shows its drop highlight round the edges.
-    slot.style.transform = `translate(${String(dx)}px, ${String(dy)}px) scale(0.86)`;
-    hover(targetAt(e.clientX, e.clientY));
-  });
-  slot.addEventListener('pointerup', () => {
-    const target = dragged ? over : null;
-    reset();
-    if (target) on.drop(target);
-    // The click that follows a drag (if the browser sends one) is swallowed, then taps work again.
-    if (dragged) setTimeout(() => (dragged = false));
-  });
-  slot.addEventListener('pointercancel', reset);
-  slot.addEventListener('click', () => {
-    if (!dragged) on.tap();
-  });
 }
