@@ -31,7 +31,7 @@ import {
   type DraftState,
   type DraftStyle,
 } from './draft';
-import { SQUAD_SIZE, type SquadKnight } from './types';
+import { HOUSE_STYLES, SQUAD_SIZE, type SquadKnight } from './types';
 
 const FORGED: Look = { ...DEFAULT_LOOK, name: 'Sir Forged', build: 0 };
 const start = (seed = 7, player = 'thorn'): DraftState => startDraft(seed, player, FORGED);
@@ -54,6 +54,7 @@ function randomDrafter(seed: number): Drafter {
 }
 
 const managed: Drafter = (draft) => chooseDraftPick(draft);
+const styleOf = (house: string): DraftStyle => HOUSE_STYLES[house]?.draft ?? 'balanced';
 const cost = (squad: readonly SquadKnight[]): number =>
   squad.reduce((s, k) => s + (TIER_COST[k.tier] ?? 0), 0);
 /** The cheapest legal pick, so scripted houses never get in the way. */
@@ -262,20 +263,26 @@ describe('rival managers', () => {
     expect(mean(() => managed)).toBeGreaterThan(mean(randomDrafter) + 0.5);
   });
 
-  it('follow their style: stars buy more Champions and Legends, depth spreads points over mid-tier knights', () => {
-    const tally = (style: DraftStyle) => {
-      const squads = [1, 2, 3, 4, 5, 6].flatMap((seed) => {
-        const draft = play(start(seed), (d) => chooseDraftPick(d, style));
-        return draft.order.map((h) => squadOf(draft, h));
-      });
-      return {
-        top: squads.flat().filter((k) => k.tier >= 3).length,
-        middle: squads.flat().filter((k) => k.tier === 1 || k.tier === 2).length,
-      };
+  it('follow their style: stars buy Legends, depth mid-tier knights, balanced sits between', () => {
+    // League drafts with every house on its own style, averaged per squad over eight seasons.
+    const squads = new Map<DraftStyle, SquadKnight[][]>();
+    for (let seed = 1; seed <= 8; seed++) {
+      const draft = play(start(seed), (d) => chooseDraftPick(d, styleOf(houseOnTheClock(d) ?? '')));
+      for (const house of draft.order)
+        squads.set(styleOf(house), [...(squads.get(styleOf(house)) ?? []), squadOf(draft, house)]);
+    }
+    const perSquad = (style: DraftStyle, tiers: readonly number[]): number => {
+      const own = squads.get(style) ?? [];
+      return own.flat().filter((k) => tiers.includes(k.tier)).length / own.length;
     };
-    const [stars, depth] = [tally('stars'), tally('depth')];
-    expect(stars.top).toBeGreaterThan(depth.top);
-    expect(depth.middle).toBeGreaterThan(stars.middle);
+    const [legends, middle, peasants] = [[4], [1, 2, 3], [0]] as const;
+    // Mid-tier is Squire to Champion. Each style differs from its neighbour in the intended direction.
+    expect(perSquad('stars', legends)).toBeGreaterThan(perSquad('balanced', legends));
+    expect(perSquad('balanced', legends)).toBeGreaterThan(perSquad('depth', legends) + 0.5);
+    expect(perSquad('depth', middle)).toBeGreaterThan(perSquad('balanced', middle) + 0.5);
+    expect(perSquad('balanced', middle)).toBeGreaterThan(perSquad('stars', middle) + 0.5);
+    expect(perSquad('stars', peasants)).toBeGreaterThan(perSquad('balanced', peasants) + 0.3);
+    expect(perSquad('balanced', peasants)).toBeGreaterThan(perSquad('depth', peasants));
   });
 });
 

@@ -364,9 +364,11 @@ export function applyPick(draft: DraftState, house: string, knightId: string): D
 }
 
 // Value model ---------------------------------------------------------------------------------
-// Checked in scripts/draft.sim.ts (bench rotated as in a league, 120 drafts, ± 2 SE): managed drafts beat
-// random legal drafts 62.2% ± 2.0%; balanced v depth 51.5% ± 3.1%, balanced v stars 46.2% ± 3.0%,
-// depth v stars 49.0% ± 3.2%. Undrafted per draft, Peasant to Legend: 6.5 8.9 7.8 4.4 5.5 of 16 22 12 18 12.
+// Checked in scripts/draft.sim.ts (bench rotated as in a league, 240 drafts, ± 2 SE): managed drafts beat
+// random legal drafts 63.4% ± 1.4%; balanced v depth 52.3% ± 2.3%, balanced v stars 49.1% ± 2.0%,
+// depth v stars 50.3% ± 2.4%. Per squad (Peasant, Squire + Knight, Champion, Legend): stars 1.13 2.87 0.83
+// 1.17, balanced 0.35 3.63 1.03 0.98, depth 0 3 3 0. Undrafted per draft: 11.6 6.1 3.4 6.4 5.5.
+// With stars at 0.41 or below they take two Legends (1.64 per squad) but lose to depth 44.5% ± 2.2%.
 // With the knights measured one at a time instead, Squires looked 0.3 worse.
 
 /**
@@ -389,10 +391,10 @@ export const OUTFIELD_BUILD_VALUE: readonly number[] = [0.09, 0, -0.11];
 export const BENCH_WEIGHT = 0.8;
 
 /**
- * Each style's belief in top tiers, as the curvature of value above a Peasant: stars (convex) pay up for
- * Legends, depth (concave) spreads points over mid tiers, balanced trusts the measured values.
+ * Each style's weight on its k-th best outfield knight: the measured weight times STYLE_RANK^k, rescaled to
+ * the measured total. Stars (below 1) treat football as a strong-link game, depth (above 1) as weak-link.
  */
-export const STYLE_CURVE: Readonly<Record<DraftStyle, number>> = { stars: 2, balanced: 1, depth: 0.5 };
+export const STYLE_RANK: Readonly<Record<DraftStyle, number>> = { stars: 0.42, balanced: 1, depth: 1.2 };
 
 /** A knight for valuing a squad; `build` is null for a future pick whose build is not known yet. */
 interface Prospect {
@@ -405,22 +407,21 @@ const prospect = (k: SquadKnight): Prospect => ({ tier: k.tier, build: k.look.bu
 interface Valuer {
   readonly keeper: (k: Prospect) => number;
   readonly outfield: (k: Prospect) => number;
+  /** Weight of each outfield place, best first: three starters, then the bench. */
+  readonly ranks: readonly number[];
 }
 
-/** Tier values bent by a style's curve, keeping Peasant and Legend where they were measured. */
+/** The measured values, weighted by rank for a style; the weights keep the measured total. */
 function valuer(style: DraftStyle): Valuer {
-  const bend = (values: readonly number[]): number[] => {
-    const low = values[0] ?? 0;
-    const span = (values[values.length - 1] ?? 0) - low;
-    return values.map((v) => (span === 0 ? v : low + span * ((v - low) / span) ** STYLE_CURVE[style]));
-  };
-  const outfield = bend(OUTFIELD_TIER_VALUE);
-  const keeper = bend(KEEPER_TIER_VALUE);
+  const measured = Array.from({ length: SQUAD_SIZE - 1 }, (_, i) => (i < STARTERS - 1 ? 1 : BENCH_WEIGHT));
+  const tilted = measured.map((w, i) => w * STYLE_RANK[style] ** i);
+  const scale = measured.reduce((s, w) => s + w, 0) / tilted.reduce((s, w) => s + w, 0);
   const build = (table: readonly number[], k: Prospect): number =>
     k.build === null ? 0 : (table[k.build] ?? 0);
   return {
-    keeper: (k) => (keeper[k.tier] ?? 0) + build(KEEPER_BUILD_VALUE, k),
-    outfield: (k) => (outfield[k.tier] ?? 0) + build(OUTFIELD_BUILD_VALUE, k),
+    keeper: (k) => (KEEPER_TIER_VALUE[k.tier] ?? 0) + build(KEEPER_BUILD_VALUE, k),
+    outfield: (k) => (OUTFIELD_TIER_VALUE[k.tier] ?? 0) + build(OUTFIELD_BUILD_VALUE, k),
+    ranks: tilted.map((w) => w * scale),
   };
 }
 
@@ -435,7 +436,7 @@ function bestShape(squad: readonly Prospect[], value: Valuer): { keeper: number;
     const starting = outfield.slice(0, STARTERS - 1).map((p) => p.tier);
     const spread = starting.length > 0 ? Math.max(...starting) - Math.min(...starting) : 0;
     const total = outfield.reduce(
-      (sum, p, i) => sum + (i < STARTERS - 1 ? p.worth : BENCH_WEIGHT * p.worth),
+      (sum, p, i) => sum + (value.ranks[i] ?? 0) * p.worth,
       value.keeper(keeper) + SPREAD_VALUE * spread,
     );
     if (total > best.value) best = { keeper: k, value: total };

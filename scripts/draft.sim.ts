@@ -22,7 +22,7 @@ import {
   type DraftState,
   type DraftStyle,
 } from '../src/modes/manager/draft';
-import type { SquadKnight } from '../src/modes/manager/types';
+import { SQUAD_SIZE, type SquadKnight } from '../src/modes/manager/types';
 import { MatchRunner } from '../src/modes/runner';
 
 const LINEUPS = Number(process.env.DRAFT_SIM_LINEUPS ?? 4000);
@@ -245,12 +245,21 @@ it(
   LIMIT,
 );
 
+/** The tier groups that tell the styles apart, counted per squad. */
+const MIX_GROUPS: readonly (readonly [string, (tier: number) => boolean])[] = [
+  ['Peasants', (t) => t === 0],
+  ['Squires+Knights', (t) => t === 1 || t === 2],
+  ['Champions', (t) => t === 3],
+  ['Legends', (t) => t === 4],
+];
+
 it(
   'draft styles',
   () => {
     // Every draft deals the three styles to houses afresh, then plays a full round robin.
     const pairs = new Map<string, number[]>();
     const tiers = new Map<DraftStyle, number[][]>(STYLES.map((s) => [s, []]));
+    const mix = new Map<DraftStyle, number[][]>(STYLES.map((s) => [s, []]));
     const undrafted = [0, 0, 0, 0, 0];
     for (let d = 0; d < DRAFTS; d++) {
       const seed = 5000 + d;
@@ -265,6 +274,12 @@ it(
             .map((k) => k.tier)
             .sort((a, b) => b - a),
         );
+      for (const style of STYLES) {
+        const own = order.filter((h) => styleOf(h) === style).flatMap((h) => squadOf(draft, h));
+        const share = (test: (tier: number) => boolean): number =>
+          own.filter((k) => test(k.tier)).length / (own.length / SQUAD_SIZE);
+        mix.get(style)?.push(MIX_GROUPS.map(([, test]) => share(test)));
+      }
       const tally = new Map<string, number[]>();
       order.forEach((a, i) => {
         order.slice(i + 1).forEach((b, j) => {
@@ -287,6 +302,11 @@ it(
         (squads.reduce((s, sq) => s + (sq[i] ?? 0), 0) / squads.length).toFixed(2);
       console.log(`${style.padEnd(9)} mean tiers, best first: ${[0, 1, 2, 3, 4, 5].map(mean).join(' ')}`);
     }
+    console.log('Knights per squad, ± 2 SE clustered by draft:');
+    for (const [style, rows] of mix)
+      MIX_GROUPS.forEach(([name], g) => {
+        console.log(`${style.padEnd(9)} ${name.padEnd(15)} ${summary(rows.map((row) => row[g] ?? 0))}`);
+      });
     // A tier nobody leaves behind is underpriced; one mostly left behind is overpriced.
     const perDraft = undrafted.map((n) => (n / DRAFTS).toFixed(1)).join(' ');
     console.log(`undrafted per draft, Peasant to Legend: ${perDraft}`);
