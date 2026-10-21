@@ -16,8 +16,11 @@ import {
   MIN_RATING,
   MIN_SHARE,
   REGULATION_STEPS,
+  manOfTheMatch,
+  outcomeCredit,
   rateMatch,
   ratingsFrom,
+  scoreOf,
   standardise,
   toRating,
   valueActions,
@@ -149,7 +152,7 @@ describe('staged moments: the right knight earns, the right knight pays', () => 
       const { s, fwd } = shotAt(!v);
       return { stats: s.recorder.stats, id: fwd.id };
     });
-    expect(scored).toBeGreaterThan(saved);
+    expect(scored - saved).toBeGreaterThan(RATING_MODEL.outcome.goal);
   });
 
   it('a block lifts the defender who made it above standing aside', () => {
@@ -332,8 +335,15 @@ describe('signs, on real matches', () => {
         expect(k.rating).toBeLessThanOrEqual(MAX_RATING);
         expect(Number.isFinite(k.score)).toBe(true);
       }
-      const best = Math.max(...ratings.knights.map((k) => k.score));
-      expect(ratings.knights.find((k) => k.id === ratings.motm)?.score).toBe(best);
+      const motm = ratings.knights.find((k) => k.id === ratings.motm);
+      if (!motm) throw new Error('no man of the match');
+      const [home, away] = [stats.teams[0].goals, stats.teams[1].goals];
+      const winner = home > away ? 0 : away > home ? 1 : null;
+      const best = (pick: (team: TeamId) => boolean) =>
+        Math.max(...ratings.knights.filter((k) => pick(k.team)).map((k) => k.score));
+      if (winner === null) expect(motm.score).toBe(best(() => true));
+      else if (motm.team === winner) expect(motm.score).toBe(best((t) => t === winner));
+      else expect(motm.score).toBeGreaterThanOrEqual(best((t) => t === winner) + RATING_MODEL.motmMargin);
     }
   });
 
@@ -425,13 +435,84 @@ describe('the rating scale', () => {
   });
 });
 
+describe('outcome credit', () => {
+  const { outcome } = RATING_MODEL;
+  const full = REGULATION_STEPS;
+  const none = { goals: 0, assists: 0, ownGoals: 0, cleanSheet: false };
+  const fwd = steps({ fwd: full });
+  const gk = steps({ gk: full });
+
+  it('is calibrated to give a goal real weight, an assist half of it and an own goal the same cost', () => {
+    // The harness fits these to a goal lifting a forward by 0.8 in all; the outcome share is about 0.2.
+    expect(outcome.goal).toBeGreaterThan(0.1);
+    expect(outcome.goal).toBeLessThan(0.5);
+    expect(outcome.assist).toBeCloseTo(outcome.goal / 2, 3);
+    expect(outcome.ownGoal).toBe(outcome.goal);
+    expect(RATING_MODEL.motmMargin).toBe(0.5);
+  });
+
+  it('lifts an otherwise equal knight by the calibrated amount for each goal and assist, and sinks him for an own goal', () => {
+    const at = (o: Partial<typeof none>) => scoreOf(0.3, { ...none, ...o }, fwd, RATING_MODEL);
+    expect(at({ goals: 1 }) - at({})).toBeCloseTo(outcome.goal, 9);
+    expect(at({ goals: 2 }) - at({})).toBeCloseTo(2 * outcome.goal, 9);
+    expect(at({ goals: 3 }) - at({ goals: 2 })).toBeCloseTo(outcome.goal, 9);
+    expect(at({ assists: 1 }) - at({})).toBeCloseTo(outcome.assist, 9);
+    expect(at({ ownGoals: 1 }) - at({})).toBeCloseTo(-outcome.ownGoal, 9);
+    // A clean sheet never costs a keeper, and counts only for his time in goal.
+    expect(scoreOf(0, { ...none, cleanSheet: true }, gk, RATING_MODEL)).toBeGreaterThanOrEqual(
+      scoreOf(0, none, gk, RATING_MODEL),
+    );
+  });
+
+  it('puts a brace above the same match without it, and the brace scorer above an equal defender', () => {
+    const brace = scoreOf(0.3, { ...none, goals: 2 }, fwd, RATING_MODEL);
+    expect(brace).toBeGreaterThan(scoreOf(0.3, none, fwd, RATING_MODEL));
+    // Same standing in process value (his position's par plus one spread) for each.
+    const { roles } = RATING_MODEL;
+    const defender = scoreOf(roles.def.mean + roles.def.sd, none, steps({ def: full }), RATING_MODEL);
+    const forward = scoreOf(roles.fwd.mean + roles.fwd.sd, { ...none, goals: 2 }, fwd, RATING_MODEL);
+    expect(forward).toBeGreaterThan(defender);
+  });
+
+  it('measures outcomes over par, so a position with no outcomes on the day sits below its usual', () => {
+    const par = outcomeCredit(none, fwd, RATING_MODEL);
+    expect(par).toBeLessThan(0);
+    expect(outcomeCredit({ ...none, goals: 1 }, fwd, RATING_MODEL)).toBeCloseTo(par + outcome.goal, 9);
+    expect(outcomeCredit(none, steps({}), RATING_MODEL)).toBe(0);
+  });
+});
+
+describe('man of the match', () => {
+  const m = RATING_MODEL.motmMargin;
+  const goals = () => 0;
+  const k = (id: number, team: TeamId, score: number) => ({ id, team, score });
+
+  it("goes to the winners' best unless a loser out-rates him by the margin or more", () => {
+    expect(manOfTheMatch([k(1, 0, 8), k(2, 1, 8 + m - 0.01)], [2, 1], goals, m)).toBe(1);
+    expect(manOfTheMatch([k(1, 0, 8), k(2, 1, 8 + m)], [2, 1], goals, m)).toBe(2);
+    expect(manOfTheMatch([k(1, 0, 8), k(2, 1, 9.5)], [0, 1], goals, m)).toBe(2);
+    expect(manOfTheMatch([k(1, 0, 8.3), k(3, 0, 7), k(2, 1, 7.9)], [0, 1], goals, m)).toBe(2);
+  });
+
+  it('goes to the best overall in a draw, by goals then the lower id when level', () => {
+    expect(manOfTheMatch([k(1, 0, 7), k(2, 1, 7.3)], [1, 1], goals, m)).toBe(2);
+    expect(manOfTheMatch([k(4, 0, 7), k(2, 1, 7)], [1, 1], goals, m)).toBe(2);
+    expect(manOfTheMatch([k(4, 0, 7), k(2, 1, 7)], [1, 1], (id) => (id === 4 ? 1 : 0), m)).toBe(4);
+    expect(manOfTheMatch([], [0, 0], goals, m)).toBeNull();
+  });
+});
+
 describe('position fairness (the harness checks this on 800 matches)', () => {
   it('gives each position a similar centre and spread', { timeout: 60_000 }, () => {
     const byRole = new Map<Role, number[]>();
+    const credit = new Map<Role, number[]>();
     for (let i = 0; i < 30; i++) {
       const tier = i % 5;
       const stats = played(fixture(700 + i, [tier, Math.min(4, tier + (i % 2))])).stats;
-      for (const k of rateMatch(stats).knights) byRole.set(k.role, [...(byRole.get(k.role) ?? []), k.rating]);
+      for (const k of rateMatch(stats).knights) {
+        byRole.set(k.role, [...(byRole.get(k.role) ?? []), k.rating]);
+        credit.set(k.role, [...(credit.get(k.role) ?? []), k.outcome]);
+      }
     }
     const all = [...byRole.values()].flat();
     const mean = (xs: readonly number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
@@ -443,6 +524,8 @@ describe('position fairness (the harness checks this on 800 matches)', () => {
       expect(Math.abs(mean(xs) - mean(all)), role).toBeLessThan(0.45);
       expect(sd(xs) / sd(all), role).toBeGreaterThan(0.6);
       expect(sd(xs) / sd(all), role).toBeLessThan(1.5);
+      // Outcomes are measured over par: on average they add nothing to any position.
+      expect(Math.abs(mean(credit.get(role) ?? [])), role).toBeLessThan(0.12);
     }
   });
 });
@@ -455,11 +538,11 @@ const golden = (stats: MatchStats): string => {
 };
 
 const GOLDEN: Readonly<Record<number, string>> = {
-  1: '2-0 | 0gk:7.46 1def:7.81 2mid:6.40 3fwd:6.58 4gk:6.76 5def:6.21 6mid:6.58 7fwd:6.82 | motm 1',
-  3: '3-4 | 0gk:6.16 1def:7.48 2mid:5.67 3fwd:8.23 4gk:6.78 5def:7.53 6mid:7.85 7fwd:7.96 | motm 3',
-  5: '3-2 | 0gk:6.80 1def:5.89 2mid:7.93 3fwd:6.41 4gk:7.19 5def:6.27 6mid:6.31 7fwd:6.96 | motm 2',
-  7: '1-3 | 0gk:5.28 1def:5.42 2mid:6.32 3fwd:7.45 4gk:6.50 5def:8.38 6mid:6.70 7fwd:7.64 | motm 5',
-  9: '0-3 | 0gk:5.76 1def:6.12 2mid:6.82 3fwd:6.66 4gk:7.16 5def:5.06 6mid:9.08 7fwd:7.20 | motm 6',
+  1: '2-0 | 0gk:7.41 1def:8.15 2mid:6.33 3fwd:6.41 4gk:6.78 5def:6.24 6mid:6.49 7fwd:6.62 | motm 1',
+  3: '3-4 | 0gk:6.23 1def:7.62 2mid:5.66 3fwd:8.37 4gk:6.80 5def:7.44 6mid:8.10 7fwd:8.24 | motm 7',
+  5: '3-2 | 0gk:6.81 1def:5.93 2mid:8.12 3fwd:6.61 4gk:7.17 5def:6.28 6mid:6.41 7fwd:7.00 | motm 2',
+  7: '1-3 | 0gk:5.43 1def:5.52 2mid:6.48 3fwd:7.31 4gk:6.54 5def:8.22 6mid:6.83 7fwd:7.83 | motm 5',
+  9: '0-3 | 0gk:5.86 1def:6.16 2mid:6.71 3fwd:6.48 4gk:7.14 5def:5.19 6mid:9.23 7fwd:7.43 | motm 6',
 };
 
 describe('golden matches', () => {

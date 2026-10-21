@@ -1,6 +1,6 @@
-// Match ratings, measured rather than guessed: every action is worth the change it made in how likely
-// each side was to score next (the fitted value model), and a knight's rating is his summed value
-// against what his position usually earns in that much time. Pure: the same stats, the same ratings.
+// Match ratings in two parts. Process: every action is worth the change it made in how likely each side
+// was to score next (the fitted value model), against what his position usually earns in that time.
+// Outcome: goals, assists, own goals and clean sheets, which decide matches, on top. Pure and replayable.
 import { MATCH, STEP } from '../game/constants';
 import type { Role, TeamId } from '../game/types';
 import { POSSESSION_HOLD, rivalOf } from './definitions';
@@ -42,18 +42,44 @@ export interface ValuedAction {
   readonly value: number;
 }
 
-/** What a position earns over a full match: the centre and spread ratings are measured against. */
+/** What a position earns over a full match: its process value's centre and spread, and its outcomes. */
 export interface RoleNorm {
   readonly mean: number;
   readonly sd: number;
+  /** Per full match in the role, the par the outcome credit is measured against. */
+  readonly goals: number;
+  readonly assists: number;
+  readonly ownGoals: number;
+  /** For keepers, the share of matches kept clean; 0 elsewhere. */
+  readonly cleanSheets: number;
+}
+
+/** Rating points for each decisive outcome (a clean sheet scaled by his share of the match in goal). */
+export interface OutcomeWeights {
+  readonly goal: number;
+  readonly assist: number;
+  readonly ownGoal: number;
+  readonly cleanSheet: number;
 }
 
 export interface RatingModel {
   readonly value: ValueModel;
   readonly roles: Readonly<Record<Role, RoleNorm>>;
-  /** Rating = BASE + lift + spread × standardised value. */
+  /** Rating = BASE + lift + spread × standardised value + outcome credit over par. */
   readonly lift: number;
   readonly spread: number;
+  readonly outcome: OutcomeWeights;
+  /** A losing side's knight is man of the match only if he out-rates the winners' best by this much. */
+  readonly motmMargin: number;
+}
+
+/** The decisive things a knight did, as the stats count them. */
+export interface Outcomes {
+  readonly goals: number;
+  readonly assists: number;
+  readonly ownGoals: number;
+  /** Kept goal and let nothing in while there. */
+  readonly cleanSheet: boolean;
 }
 
 export interface KnightRating {
@@ -67,6 +93,8 @@ export interface KnightRating {
   readonly score: number;
   /** Summed action value. */
   readonly value: number;
+  /** Rating points from outcomes, over his position's par. */
+  readonly outcome: number;
 }
 
 export interface MatchRatings {
@@ -287,6 +315,44 @@ export function standardise(
 
 export const toRating = (score: number): number => Math.min(MAX_RATING, Math.max(MIN_RATING, score));
 
+export const outcomesOf = (k: KnightStats): Outcomes => ({
+  goals: k.goals,
+  assists: k.assists,
+  ownGoals: k.ownGoals,
+  cleanSheet: k.roleSteps.gk > 0 && k.goalsConceded === 0,
+});
+
+// Outcomes over par: a position's usual goals (or clean sheets) for his time are taken off, so every
+// position keeps the same centre and a forward who doesn't score sits below one who does.
+export function outcomeCredit(o: Outcomes, roleSteps: KnightStats['roleSteps'], model: RatingModel): number {
+  const w = model.outcome;
+  const share = (r: Role): number => roleSteps[r] / REGULATION_STEPS;
+  const par = ROLES.reduce((sum, r) => {
+    const n = model.roles[r];
+    const usual =
+      w.goal * n.goals + w.assist * n.assists - w.ownGoal * n.ownGoals + w.cleanSheet * n.cleanSheets;
+    return sum + share(r) * usual;
+  }, 0);
+  const got =
+    w.goal * o.goals -
+    w.ownGoal * o.ownGoals +
+    w.assist * o.assists +
+    (o.cleanSheet ? w.cleanSheet * share('gk') : 0);
+  return got - par;
+}
+
+/** A rating before clamping, from summed action value, outcomes and time in each role. */
+export const scoreOf = (
+  value: number,
+  o: Outcomes,
+  roleSteps: KnightStats['roleSteps'],
+  model: RatingModel,
+): number =>
+  BASE +
+  model.lift +
+  model.spread * standardise(value, roleSteps, model.roles) +
+  outcomeCredit(o, roleSteps, model);
+
 /** Ratings from already valued actions; `rateMatch` is the usual way in. */
 export function ratingsFrom(
   stats: MatchStats,
@@ -299,27 +365,39 @@ export function ratingsFrom(
     .filter((k) => k.playedSteps > 0)
     .map((k): KnightRating => {
       const value = totals.get(k.id) ?? 0;
-      const score = BASE + model.lift + model.spread * standardise(value, k.roleSteps, model.roles);
-      return { id: k.id, team: k.team, role: mainRole(k), rating: toRating(score), score, value };
+      const outcomes = outcomesOf(k);
+      const score = scoreOf(value, outcomes, k.roleSteps, model);
+      const outcome = outcomeCredit(outcomes, k.roleSteps, model);
+      return { id: k.id, team: k.team, role: mainRole(k), rating: toRating(score), score, value, outcome };
     });
-  return { knights, motm: manOfTheMatch(stats, knights) };
+  const goals = new Map(stats.knights.map((k) => [k.id, k.goals]));
+  const score: [number, number] = [stats.teams[0].goals, stats.teams[1].goals];
+  return { knights, motm: manOfTheMatch(knights, score, (id) => goals.get(id) ?? 0, model.motmMargin) };
 }
 
 export const rateMatch = (stats: MatchStats, model: RatingModel = RATING_MODEL): MatchRatings =>
   ratingsFrom(stats, valueActions(stats, model.value), model);
 
-// The best score; level, the winning side's knight, then the one with more goals, then the lower id
-// (all deterministic, so a replay always names the same knight).
-function manOfTheMatch(stats: MatchStats, knights: readonly KnightRating[]): number | null {
-  const [home, away] = [stats.teams[0].goals, stats.teams[1].goals];
-  const winner: TeamId | null = home > away ? 0 : away > home ? 1 : null;
-  const goals = (id: number): number => stats.knights.find((k) => k.id === id)?.goals ?? 0;
-  const ranked = [...knights].sort(
-    (a, b) =>
-      b.score - a.score ||
-      Number(b.team === winner) - Number(a.team === winner) ||
-      goals(b.id) - goals(a.id) ||
-      a.id - b.id,
-  );
-  return ranked[0]?.id ?? null;
+/** What the man of the match is chosen from. */
+export interface Contender {
+  readonly id: number;
+  readonly team: TeamId;
+  readonly score: number;
+}
+
+// The winning side's best, unless a loser out-rates him by `margin`: the award goes to who decided the
+// match. In a draw, the best overall. Level scores go to more goals, then the lower id (deterministic).
+export function manOfTheMatch(
+  knights: readonly Contender[],
+  score: readonly [number, number],
+  goals: (id: number) => number,
+  margin: number,
+): number | null {
+  const ranked = [...knights].sort((a, b) => b.score - a.score || goals(b.id) - goals(a.id) || a.id - b.id);
+  const winner: TeamId | null = score[0] > score[1] ? 0 : score[1] > score[0] ? 1 : null;
+  if (winner === null) return ranked[0]?.id ?? null;
+  const best = ranked.find((k) => k.team === winner);
+  const loser = ranked.find((k) => k.team !== winner);
+  if (!best) return loser?.id ?? null;
+  return loser && loser.score >= best.score + margin ? loser.id : best.id;
 }

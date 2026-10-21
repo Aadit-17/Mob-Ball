@@ -15,10 +15,16 @@ import { rosterLineup } from '../src/setup/rosters';
 import { setTeamTier } from '../src/setup/squads';
 import {
   BASE,
+  manOfTheMatch,
+  outcomeCredit,
+  outcomesOf,
   ratingsFrom,
+  scoreOf,
   standardise,
   toRating,
   valueActions,
+  type OutcomeWeights,
+  type Outcomes,
   type RatingModel,
   type RoleNorm,
   type ValuedAction,
@@ -46,6 +52,17 @@ const SAMPLE_EVERY = 12;
 const ALPHAS = [1, 3, 10, 30, 100, 300, 1000, 3000] as const;
 /** The middle 60% of ratings should read 6.0 to 7.5: a typical match, as the plan asks. */
 const TYPICAL = { low: 0.2, high: 0.8, from: 6, to: 7.5 } as const;
+// Outcome credit, calibrated to stated targets rather than feel. A goal should lift a forward by the middle
+// of the 0.6–1.0 band the owner set (today's process value alone gives about 0.6); an assist is worth
+// half a goal (the usual football-ratings split) and an own goal mirrors a goal. A clean sheet keeps the
+// keeper where process value already puts him (7.5 on average). The margin: see MOTM_MARGIN.
+const GOAL_LIFT = 0.8;
+const ASSIST_SHARE = 0.5;
+const CLEAN_SHEET_RATING = 7.5;
+// A loser must out-rate the winners' best by half a point to take man of the match: more than half a
+// goal's lift, so a decisive goal outweighs a busier match on the losing side, but a clearly better one
+// still wins it.
+const MOTM_MARGIN = 0.5;
 const BOOTSTRAPS = 200;
 /** A league season's matches, for how steady an average rating is. */
 const SEASON = 14;
@@ -56,17 +73,28 @@ const LABELS = 3;
 const CHECKS = {
   /** The value model must beat knowing nothing about the state, on matches it never saw. */
   minLogLossGain: 0.05,
-  /** Each position's mean rating within this of the overall mean, and its spread within this ratio. */
-  roleMeanBand: 0.15,
-  roleSpreadBand: [0.85, 1.15],
+  /** Each position's mean rating within this of the overall mean; spreads may differ (forwards peak higher). */
+  roleMeanBand: 0.2,
+  roleSpreadBand: [0.8, 1.3],
   /** The middle 60%: 6.0–7.5 give or take this. */
   typicalBand: 0.15,
   /** A standout (top 5%) match lands at 8–9. */
   standout: [7.9, 9.1],
-  /** A side's mean rating must follow its goal difference... */
+  /** A side's mean rating must follow its goal difference. */
   minTeamGoalDiffCorrelation: 0.6,
-  /** ...and the man of the match should be on the winning side most of the time (football: about 85%). */
-  minMotmWinShare: 0.75,
+  /** A goal lifts a forward by 0.6–1.0 (the slope of his rating on his goals). */
+  goalLift: [0.6, 1.0],
+  /** A winning side's two-goal scorer usually lands around 8; a hat-trick above that. */
+  braceMedian: [7.6, 8.6],
+  /** Man of the match on the winning side as often as in football. */
+  minMotmWinShare: 0.85,
+  /** Keepers still win it sometimes, and no more often than their quarter of the pitch. */
+  keeperMotmShare: [0.02, 0.3],
+  minCleanSheetMean: 7.3,
+  /** Process value still carries most of a rating, so it never becomes a goal count. */
+  minProcessShare: 0.6,
+  /** A goalless defender out-rates a winning brace scorer in at most this share of such matches. */
+  maxDefenderOverBrace: 0.15,
 } as const;
 
 interface Job {
@@ -98,6 +126,7 @@ interface KnightRow {
   readonly events: readonly number[];
   readonly conceded: number;
   readonly goals: number;
+  readonly outcomes: Outcomes;
   readonly rating: number;
   readonly score: number;
 }
@@ -257,6 +286,7 @@ function rate(job: Job, model: RatingModel): RateRow {
         events: mine.map((a) => a.value),
         conceded: k.goalsConceded,
         goals: k.goals,
+        outcomes: outcomesOf(k),
         rating: r?.rating ?? 0,
         score: r?.score ?? 0,
       };
@@ -531,28 +561,169 @@ function cellSketch(probs: Float64Array): string[] {
 
 // ------------------------------------------------------------------ calibration
 
+/** Ratings a model would give: each knight's score, and the man of the match per row. */
+function scored(rows: readonly RateRow[], model: RatingModel) {
+  return rows.map((r) => {
+    const knights = r.knights.map((k) => ({ k, score: scoreOf(k.value, k.outcomes, k.roleSteps, model) }));
+    const goals = new Map(r.knights.map((k) => [k.id, k.goals]));
+    const contenders = knights.map(({ k, score }) => ({ id: k.id, team: k.team, score }));
+    return {
+      r,
+      knights,
+      motm: manOfTheMatch(contenders, r.score, (id) => goals.get(id) ?? 0, model.motmMargin),
+    };
+  });
+}
+
+const won = (r: RateRow, team: TeamId): boolean => r.score[team] > r.score[team === 0 ? 1 : 0];
+
+/** Least-squares slope of a forward's rating on his goals: what one goal is worth to him. */
+function goalLift(rows: readonly RateRow[], model: RatingModel): number {
+  const fwds = scored(rows, model).flatMap((m) => m.knights.filter(({ k }) => k.whole && k.role === 'fwd'));
+  const xs = fwds.map(({ k }) => k.goals);
+  const ys = fwds.map(({ score }) => toRating(score));
+  const [mx, my] = [mean(xs), mean(ys)];
+  const cov = xs.reduce((a, x, i) => a + (x - mx) * ((ys[i] ?? 0) - my), 0);
+  return cov / xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+}
+
+/** The targets the outcome weights are checked against, on any set of rows. */
+function outcomeTargets(rows: readonly RateRow[], model: RatingModel) {
+  const ms = scored(rows, model);
+  const winners = (min: number, max = Infinity) =>
+    ms.flatMap((m) =>
+      m.knights
+        .filter(({ k }) => won(m.r, k.team) && k.goals >= min && k.goals <= max)
+        .map(({ score }) => toRating(score)),
+    );
+  const decisive = ms.filter((m) => m.r.score[0] !== m.r.score[1]);
+  const motmOf = (m: (typeof ms)[number]) => m.knights.find(({ k }) => k.id === m.motm)?.k;
+  const keepers = ms.flatMap((m) => m.knights.filter(({ k }) => k.whole && k.role === 'gk'));
+  const all = ms.flatMap((m) => m.knights);
+  const processPart = all.map(({ k }) => model.spread * standardise(k.value, k.roleSteps, model.roles));
+  // A goalless, assistless defender rated above a winning side's brace scorer in the same match.
+  const braceMatches = ms.filter((m) => m.knights.some(({ k }) => k.goals >= 2 && won(m.r, k.team)));
+  const defenderOver = braceMatches.filter((m) => {
+    const brace = Math.max(
+      ...m.knights.filter(({ k }) => k.goals >= 2 && won(m.r, k.team)).map((q) => q.score),
+    );
+    return m.knights.some(
+      ({ k, score }) => k.role === 'def' && k.goals + k.outcomes.assists === 0 && score > brace,
+    );
+  }).length;
+  return {
+    goalLift: goalLift(rows, model),
+    brace: quantile(winners(2, 2), 0.5),
+    braces: winners(2, 2).length,
+    hatTrick: quantile(winners(3), 0.5),
+    hatTricks: winners(3).length,
+    motmWinShare:
+      decisive.filter((m) => {
+        const k = motmOf(m);
+        return k !== undefined && won(m.r, k.team);
+      }).length / (decisive.length || 1),
+    keeperMotm: ms.filter((m) => motmOf(m)?.role === 'gk').length / (ms.length || 1),
+    cleanSheet: mean(keepers.filter(({ k }) => k.conceded === 0).map(({ score }) => toRating(score))),
+    processShare: sd(processPart) ** 2 / sd(all.map(({ score }) => score)) ** 2,
+    defenderOverBrace: defenderOver / (braceMatches.length || 1),
+  };
+}
+
+/** Lift and spread so the middle 60% of ratings read 6.0–7.5, whatever the outcome weights. */
+function scale(rows: readonly RateRow[], base: Omit<RatingModel, 'lift' | 'spread'>): RatingModel {
+  const parts = rows.flatMap((r) =>
+    r.knights.map((k) => ({
+      z: standardise(k.value, k.roleSteps, base.roles),
+      c: outcomeCredit(k.outcomes, k.roleSteps, { ...base, lift: 0, spread: 0 }),
+    })),
+  );
+  const band = (spread: number) => {
+    const xs = parts.map((p) => spread * p.z + p.c);
+    return { lo: quantile(xs, TYPICAL.low), hi: quantile(xs, TYPICAL.high) };
+  };
+  let [a, b] = [0.05, 3];
+  for (let i = 0; i < 40; i++) {
+    const m = (a + b) / 2;
+    const { lo, hi } = band(m);
+    if (hi - lo < TYPICAL.to - TYPICAL.from) a = m;
+    else b = m;
+  }
+  const spread = Math.round(((a + b) / 2) * 1e4) / 1e4;
+  const lift = Math.round((TYPICAL.from - BASE - band(spread).lo) * 1e4) / 1e4;
+  return { ...base, lift, spread };
+}
+
+/** Bisection on a quantity that rises with x. */
+function solve(f: (x: number) => number, target: number, lo: number, hi: number, steps = 20): number {
+  let [a, b] = [lo, hi];
+  for (let i = 0; i < steps; i++) {
+    const m = (a + b) / 2;
+    if (f(m) < target) a = m;
+    else b = m;
+  }
+  return Math.round(((a + b) / 2) * 1e4) / 1e4;
+}
+
 function calibrate(value: ValueModel, rows: readonly RateRow[]): { model: RatingModel; lines: string[] } {
-  const whole = (role: Role): number[] =>
-    rows.flatMap((r) => r.knights.filter((k) => k.whole && k.role === role).map((k) => k.value));
+  const whole = (role: Role): KnightRow[] =>
+    rows.flatMap((r) => r.knights.filter((k) => k.whole && k.role === role));
+  const r4 = (x: number): number => Math.round(x * 1e4) / 1e4;
   const norm = (role: Role): RoleNorm => {
-    const xs = whole(role);
-    return { mean: Math.round(mean(xs) * 1e4) / 1e4, sd: Math.round(sd(xs) * 1e4) / 1e4 };
+    const ks = whole(role);
+    const values = ks.map((k) => k.value);
+    return {
+      mean: r4(mean(values)),
+      sd: r4(sd(values)),
+      goals: r4(mean(ks.map((k) => k.outcomes.goals))),
+      assists: r4(mean(ks.map((k) => k.outcomes.assists))),
+      ownGoals: r4(mean(ks.map((k) => k.outcomes.ownGoals))),
+      cleanSheets: r4(mean(ks.map((k) => (k.outcomes.cleanSheet ? 1 : 0)))),
+    };
   };
   const roles = { gk: norm('gk'), def: norm('def'), mid: norm('mid'), fwd: norm('fwd') };
-  const z = rows.flatMap((r) => r.knights.map((k) => standardise(k.value, k.roleSteps, roles)));
-  const [lo, hi] = [quantile(z, TYPICAL.low), quantile(z, TYPICAL.high)];
-  const spread = Math.round(((TYPICAL.to - TYPICAL.from) / (hi - lo)) * 1e4) / 1e4;
-  const lift = Math.round((TYPICAL.from - BASE - spread * lo) * 1e4) / 1e4;
+  const weights = (goal: number, cleanSheet: number): OutcomeWeights => ({
+    goal,
+    assist: r4(goal * ASSIST_SHARE),
+    ownGoal: goal,
+    cleanSheet,
+  });
+  const modelFor = (goal: number, cleanSheet: number): RatingModel =>
+    scale(rows, { value, roles, outcome: weights(goal, cleanSheet), motmMargin: MOTM_MARGIN });
+  // For each goal weight, the clean-sheet weight that holds the keeper's clean-sheet mean at its target.
+  const withKeeper = (goal: number): RatingModel =>
+    modelFor(
+      goal,
+      solve((c) => outcomeTargets(rows, modelFor(goal, c)).cleanSheet, CLEAN_SHEET_RATING, 0, 3),
+    );
+  const goal = solve((g) => goalLift(rows, withKeeper(g)), GOAL_LIFT, 0, 2);
+  const model = withKeeper(goal);
+
+  const curve = [0, 0.25, 0.5, 0.75, 1, 1.25].map((g) => {
+    const m = withKeeper(g);
+    const t = outcomeTargets(rows, m);
+    return (
+      `    goal ${f2(g).padStart(5)} · clean sheet ${f2(m.outcome.cleanSheet)}: goal lift ${f2(t.goalLift)}, brace ${f2(t.brace)}, ` +
+      `hat-trick ${f2(t.hatTrick)}, MOTM on winners ${pct(t.motmWinShare)}, keeper MOTM ${pct(t.keeperMotm)}, ` +
+      `process share ${pct(t.processShare)}, defender over brace ${pct(t.defenderOverBrace)}`
+    );
+  });
+  const t = outcomeTargets(rows, model);
   return {
-    model: { value, roles, lift, spread },
+    model,
     lines: [
-      `Calibration: ${rows.length} fresh matches. A position's norm is the summed value of knights who played a whole match in it:`,
+      `Calibration: ${rows.length} fresh matches. A position's norm is from knights who played a whole match in it:`,
       ...ROLES.map(
         (r) =>
-          `  ${r.padEnd(4)} mean ${f3(roles[r].mean)} sd ${f3(roles[r].sd)} (${whole(r).length} knights)`,
+          `  ${r.padEnd(4)} value ${f3(roles[r].mean)} ± ${f3(roles[r].sd)} · a match: goals ${f3(roles[r].goals)} ` +
+          `assists ${f3(roles[r].assists)} own goals ${f3(roles[r].ownGoals)} clean sheets ${f3(roles[r].cleanSheets)} ` +
+          `(${whole(r).length} knights)`,
       ),
-      `  rating = ${BASE} + ${f3(lift)} + ${f3(spread)} × z, where z = (value − par) / spread for his minutes and roles; ` +
-        `chosen so the ${pct(TYPICAL.low)} and ${pct(TYPICAL.high)} quantiles of z read ${TYPICAL.from} and ${TYPICAL.to}`,
+      `  outcome weights against targets (each row re-scaled so the middle 60% reads ${TYPICAL.from}–${TYPICAL.to}):`,
+      ...curve,
+      `  chosen: goal ${f3(model.outcome.goal)} (a goal lifts a forward ${f2(t.goalLift)}, target ${GOAL_LIFT}), assist ${f3(model.outcome.assist)}, ` +
+        `own goal −${f3(model.outcome.ownGoal)}, clean sheet ${f3(model.outcome.cleanSheet)} (clean-sheet keepers average ${f2(t.cleanSheet)}); ` +
+        `man of the match margin ${MOTM_MARGIN}`,
+      `  rating = ${BASE} + ${f3(model.lift)} + ${f3(model.spread)} × z + outcomes over par, where z = (value − par) / spread for his minutes and roles`,
     ],
   };
 }
@@ -656,6 +827,26 @@ function evaluate(rows: readonly RateRow[], model: RatingModel): Verdict {
   check(teamCorr >= CHECKS.minTeamGoalDiffCorrelation, `side mean vs goal difference ${f2(teamCorr)}`);
   check(motmShare >= CHECKS.minMotmWinShare, `man of the match on the winning side only ${pct(motmShare)}`);
 
+  // Outcome credit against its targets, on matches the weights never saw.
+  const t = outcomeTargets(rows, model);
+  const bestOverall = outcomeTargets(rows, { ...model, motmMargin: 0 }).motmWinShare;
+  lines.push(
+    `  outcomes: a goal lifts a forward ${f2(t.goalLift)}; winning brace median ${f2(t.brace)} (${t.braces}), ` +
+      `hat-trick ${f2(t.hatTrick)} (${t.hatTricks}); keeper MOTM ${pct(t.keeperMotm)}; process value carries ` +
+      `${pct(t.processShare)} of the variance; a goalless defender above a winning brace scorer in ${pct(t.defenderOverBrace)}; ` +
+      `MOTM on the winners ${pct(t.motmWinShare)} (${pct(bestOverall)} without the margin)`,
+  );
+  const inside = (x: number, [lo, hi]: readonly [number, number]) => x >= lo && x <= hi;
+  check(inside(t.goalLift, CHECKS.goalLift), `a goal lifts a forward ${f2(t.goalLift)}`);
+  check(inside(t.brace, CHECKS.braceMedian), `winning brace median ${f2(t.brace)}`);
+  check(t.hatTrick > t.brace, `hat-trick median ${f2(t.hatTrick)} not above the brace's`);
+  check(inside(t.keeperMotm, CHECKS.keeperMotmShare), `keepers are man of the match ${pct(t.keeperMotm)}`);
+  check(t.processShare >= CHECKS.minProcessShare, `process value carries only ${pct(t.processShare)}`);
+  check(
+    t.defenderOverBrace <= CHECKS.maxDefenderOverBrace,
+    `defenders above brace scorers ${pct(t.defenderOverBrace)}`,
+  );
+
   // Keepers: a rating that follows the goals he let in, as it should, and not only them.
   const keepers = all.filter((k) => k.role === 'gk' && k.whole);
   lines.push(
@@ -667,6 +858,7 @@ function evaluate(rows: readonly RateRow[], model: RatingModel): Verdict {
     )}; mean rating with a clean sheet ${f2(mean(keepers.filter((k) => k.conceded === 0).map((k) => k.rating)))}, ` +
       `conceding 3+ ${f2(mean(keepers.filter((k) => k.conceded >= 3).map((k) => k.rating)))}`,
   );
+  check(t.cleanSheet >= CHECKS.minCleanSheetMean, `clean-sheet keepers average ${f2(t.cleanSheet)}`);
   lines.push(...noise(rows, model));
   return { lines, failures };
 }
@@ -676,7 +868,7 @@ function evaluate(rows: readonly RateRow[], model: RatingModel): Verdict {
 // Bootstrap: a knight's actions resampled, the spread of the rating they give.
 function noise(rows: readonly RateRow[], model: RatingModel): string[] {
   const random = lcg(7);
-  const lines = ['  noise (knights who played a whole match in one role):'];
+  const lines = ['  noise in the process value (knights who played a whole match in one role):'];
   for (const role of ROLES) {
     const ks = rows.flatMap((r) => r.knights.filter((k) => k.whole && k.role === role));
     const halfSteps = (k: KnightRow) => ({ ...k.roleSteps, [role]: k.roleSteps[role] / 2 });
@@ -690,7 +882,7 @@ function noise(rows: readonly RateRow[], model: RatingModel): string[] {
     const ses = ks.slice(0, 400).map((k) => {
       const draws = Array.from({ length: BOOTSTRAPS }, () => {
         const v = k.events.reduce((sum) => sum + (k.events[Math.floor(random() * k.events.length)] ?? 0), 0);
-        return toRating(BASE + model.lift + model.spread * standardise(v, k.roleSteps, model.roles));
+        return toRating(scoreOf(v, k.outcomes, k.roleSteps, model));
       });
       return sd(draws);
     });
