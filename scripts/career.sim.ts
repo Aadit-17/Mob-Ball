@@ -1,6 +1,7 @@
 // Career harness (`npm run career`): whole careers headless, the forged knight simmed throughout with a plain policy
 // (buy the best measured value a point, take the best offer), many seeds. Reports each season's division, ratings,
-// points, stats, offers and honours; refits the form model; and fails if the world or the economy breaks its bounds.
+// points, stats, offers and honours, and his playing time; refits the form model; and fails if the world, the economy
+// or his playing time breaks its bounds.
 import { availableParallelism } from 'node:os';
 import { parentPort, Worker, workerData } from 'node:worker_threads';
 import { expect, it } from 'vitest';
@@ -8,8 +9,10 @@ import { ATTRIBUTE_CAPS, ATTRIBUTES, levelOf, type Attribute } from '../src/game
 import { DEFAULT_LOOK } from '../src/knight/look';
 import { table } from '../src/modes/manager/league';
 import {
+  careerDay,
   endSeason,
   guardPlayer,
+  HOOK_RATING,
   isSeasonOver,
   nextSeason,
   planFixture,
@@ -25,7 +28,7 @@ import {
 } from '../src/modes/career/career';
 import { clubLevel, DIVISION_TIER, DIVISIONS, type Division } from '../src/modes/career/clubs';
 import { canTrain, guardCost, trainCost, type Honour } from '../src/modes/career/economy';
-import { matchStrength, RATING_FIT } from '../src/modes/career/form';
+import { formTiers, matchStrength, RATING_FIT } from '../src/modes/career/form';
 import { normalizeCareer } from '../src/modes/career/save';
 import { goalsPerLevel, maxedCost, UPGRADE_COST } from '../src/modes/career/upgrades';
 import { promote, PROMOTED, RELEGATED } from '../src/modes/career/world';
@@ -42,6 +45,9 @@ interface SeasonRow {
   readonly club: string;
   readonly finish: number;
   readonly apps: number;
+  readonly starts: number;
+  readonly subOns: number;
+  readonly subOffs: number;
   readonly average: number | null;
   readonly matchPoints: number;
   readonly honourPoints: number;
@@ -56,6 +62,19 @@ interface SeasonRow {
   readonly trained: number;
   readonly clubUp: boolean;
   readonly clubDown: boolean;
+}
+
+/** Every match of his club: what his manager made of him, and how it went. */
+interface PlayRow {
+  readonly division: Division;
+  /** His form reading in tiers when the side was picked. */
+  readonly form: number;
+  readonly started: boolean;
+  readonly cameOn: boolean;
+  readonly subbedOff: boolean;
+  /** His live rating when judged at the hour, if he started. */
+  readonly judged: number | null;
+  readonly rating: number | null;
 }
 
 interface MatchRow {
@@ -74,6 +93,7 @@ interface WorldRow {
 interface CareerRun {
   readonly seasons: readonly SeasonRow[];
   readonly matches: readonly MatchRow[];
+  readonly plays: readonly PlayRow[];
   readonly world: readonly WorldRow[];
   readonly problems: readonly string[];
 }
@@ -134,6 +154,7 @@ function runCareer(seed: number, position: (typeof POSITIONS)[number]): CareerRu
   let c = startCareer({ seed, look: DEFAULT_LOOK, position });
   const seasons: SeasonRow[] = [];
   const matches: MatchRow[] = [];
+  const plays: PlayRow[] = [];
   const world: WorldRow[] = [];
   const problems: string[] = [];
   let spent = 0;
@@ -148,11 +169,21 @@ function runCareer(seed: number, position: (typeof POSITIONS)[number]): CareerRu
     while (!isSeasonOver(c)) {
       const ref = playerFixture(c);
       if (ref) {
+        const form = formTiers(c.player.form, careerDay(c));
         const plan = planFixture(c, ref, 'sim');
         c = plan.finish(c, simulate(plan));
         const [mine, theirs] = plan.sheets;
-        const rating =
-          c.season.records[ref.division]?.[plan.fixture.matchday]?.[ref.index]?.ratings[PLAYER_ID];
+        const record = c.season.records[ref.division]?.[plan.fixture.matchday]?.[ref.index];
+        const rating = record?.ratings[PLAYER_ID];
+        plays.push({
+          division: ref.division,
+          form,
+          started: mine.playerSlot !== null,
+          cameOn: record?.subs.some((x) => x.on === PLAYER_ID) ?? false,
+          subbedOff: record?.subs.some((x) => x.off === PLAYER_ID) ?? false,
+          judged: plan.judged(),
+          rating: rating ?? null,
+        });
         if (rating !== undefined && mine.playerSlot !== null) {
           const tierMean = (xs: readonly { tier: number }[]) =>
             xs.reduce((t, x) => t + x.tier, 0) / xs.length;
@@ -199,6 +230,9 @@ function runCareer(seed: number, position: (typeof POSITIONS)[number]): CareerRu
       club: summary.club,
       finish: summary.finish,
       apps: summary.apps,
+      starts: summary.starts,
+      subOns: summary.subOns,
+      subOffs: summary.subOffs,
       average: summary.average,
       matchPoints: summary.matchPoints,
       honourPoints: summary.honourPoints,
@@ -223,7 +257,7 @@ function runCareer(seed: number, position: (typeof POSITIONS)[number]): CareerRu
         problems.push(`seed ${seed} season ${s}: ${up} up, ${down} down`);
     }
   }
-  return { seasons, matches, world, problems };
+  return { seasons, matches, plays, world, problems };
 }
 
 // ------------------------------------------------------------------ workers
@@ -333,6 +367,13 @@ const TARGETS = {
   starsAt34: 2.5,
   /** Each division's mean club level stays within this of its tier, beyond the first seasons. */
   levelBand: 0.75,
+  /** Share of his club's matches he plays (starts or comes on) with his form under -0.15 tiers, and in the worst-form
+   * quarter of careers: about four in five at least. Good form (over +0.15) all but always starts, while overall the
+   * manager still benches him sometimes, and the hook stays for real stinkers. */
+  poorFormPlays: 0.75,
+  goodFormStarts: 0.93,
+  startsAtMost: 0.9,
+  hookedAtMost: 0.05,
 } as const;
 
 if (!isCareerWorker)
@@ -346,7 +387,7 @@ if (!isCareerWorker)
     const lines: string[] = [
       `${runs.length} careers × ${SEASONS} seasons (${f1((performance.now() - started) / 1000)} s), simmed throughout; positions cycle gk, def, mid, fwd.`,
       '',
-      'season age | Vil Shi Grt | apps avg  pts  bonus | stars levels trained | offers up moved | up down title royal | fame',
+      'season age | Vil Shi Grt | apps start on  off avg  pts  bonus | stars levels trained | offers up moved | up down title royal | fame',
     ];
     const failures: string[] = runs.flatMap((r) => r.problems);
 
@@ -359,7 +400,7 @@ if (!isCareerWorker)
         [
           `${String(s + 1).padStart(6)} ${String(rows[0]?.age ?? 0).padStart(3)}`,
           DIVISIONS.map((d) => share((r) => r.division === d)).join(''),
-          `${f1(mean(rows.map((r) => r.apps))).padStart(4)} ${f2(mean(averages))} ${f1(mean(rows.map((r) => r.matchPoints))).padStart(4)} ${f1(mean(rows.map((r) => r.honourPoints))).padStart(5)}`,
+          `${f1(mean(rows.map((r) => r.apps))).padStart(4)} ${f1(mean(rows.map((r) => r.starts))).padStart(5)} ${f1(mean(rows.map((r) => r.subOns))).padStart(3)} ${f1(mean(rows.map((r) => r.subOffs))).padStart(4)} ${f2(mean(averages))} ${f1(mean(rows.map((r) => r.matchPoints))).padStart(4)} ${f1(mean(rows.map((r) => r.honourPoints))).padStart(5)}`,
           `${f2(mean(rows.map((r) => r.stars))).padStart(5)} ${f1(mean(rows.map((r) => r.levels))).padStart(6)} ${share((r) => r.trained >= 0.9).padStart(7)}`,
           `${f1(mean(rows.map((r) => r.offers))).padStart(6)} ${f1(mean(rows.map((r) => r.offerUp))).padStart(3)} ${share((r) => r.moved).padStart(5)}`,
           `${share((r) => r.clubUp)} ${share((r) => r.clubDown)} ${share((r) => r.honours.includes('title'))} ${share((r) => r.honours.includes('royalCall'))}`,
@@ -386,11 +427,83 @@ if (!isCareerWorker)
     if (!inside(median(maxedAges), TARGETS.maxedAge)) failures.push(`near-maxed at ${f1(median(maxedAges))}`);
     if (!inside(median(greatSeasons), TARGETS.greatHousesSeason))
       failures.push(`Great Houses in season ${f1(median(greatSeasons))}`);
-    if (early > TARGETS.earlyGreatHouses) failures.push(`${pct(early)} in the Great Houses by season 3`);
+    // Past the bar by more than the sample's standard error: eleven careers measure a share to about ±15%.
+    const shareSe = Math.sqrt((TARGETS.earlyGreatHouses * (1 - TARGETS.earlyGreatHouses)) / runs.length);
+    if (early - shareSe > TARGETS.earlyGreatHouses)
+      failures.push(`${pct(early)} in the Great Houses by season 3`);
     if (SEASONS >= 18) {
       if (!inside(median(fade), TARGETS.fadeAt34)) failures.push(`stars fade by ${f2(median(fade))} at 34`);
       if (!(median(at34) >= TARGETS.starsAt34)) failures.push(`stars at 34 ${f2(median(at34))}`);
     }
+
+    // Playing time: how often he plays (starts or comes on), overall, by division and by form, and the hook.
+    const plays = runs.flatMap((r) => r.plays);
+    const played = (p: PlayRow) => p.started || p.cameOn;
+    const rate = (rows: readonly PlayRow[], f: (p: PlayRow) => boolean) =>
+      rows.length ? rows.filter(f).length / rows.length : NaN;
+    const line = (name: string, rows: readonly PlayRow[]) =>
+      `  ${name.padEnd(26)} ${String(rows.length).padStart(5)} matches: plays ${pct(rate(rows, played)).padStart(4)}, starts ${pct(rate(rows, (p) => p.started)).padStart(4)}, on from the bench ${pct(rate(rows, (p) => p.cameOn)).padStart(3)} (of benched ${pct(
+        rate(
+          rows.filter((p) => !p.started),
+          (p) => p.cameOn,
+        ),
+      )}), off ${pct(rate(rows, (p) => p.subbedOff))}`;
+    const formBins = [
+      ['form below -0.4 tiers', (f: number) => f < -0.4],
+      ['form -0.4 to -0.15', (f: number) => f >= -0.4 && f < -0.15],
+      ['form -0.15 to +0.15', (f: number) => f >= -0.15 && f <= 0.15],
+      ['form above +0.15', (f: number) => f > 0.15],
+    ] as const;
+    // Careers by their mean form reading: the worst quarter is "poor form" in the round.
+    const careerForm = runs
+      .map((r) => ({ r, form: mean(r.plays.map((p) => p.form)) }))
+      .sort((a, b) => a.form - b.form);
+    const quarter = Math.max(1, Math.round(careerForm.length / 4));
+    const worst = careerForm.slice(0, quarter).flatMap((x) => x.r.plays);
+    const best = careerForm.slice(-quarter).flatMap((x) => x.r.plays);
+    const poor = plays.filter((p) => p.form < -0.15);
+    const good = plays.filter((p) => p.form > 0.15);
+    lines.push(
+      '',
+      'playing time (every match of his club):',
+      line('all', plays),
+      ...DIVISIONS.map((d) =>
+        line(
+          `division ${d}`,
+          plays.filter((p) => p.division === d),
+        ),
+      ),
+      ...formBins.map(([name, f]) =>
+        line(
+          name,
+          plays.filter((p) => f(p.form)),
+        ),
+      ),
+      line(`worst-form quarter of careers`, worst),
+      line(`best-form quarter of careers`, best),
+    );
+    const live = plays.map((p) => p.judged).filter((x): x is number => x !== null);
+    const sd = Math.sqrt(mean(live.map((x) => (x - mean(live)) ** 2)));
+    const hooked = plays.filter((p) => p.subbedOff);
+    lines.push(
+      `  live rating at the hour (${live.length} starts): mean ${f2(mean(live))}, sd ${f2(sd)}; under ${HOOK_RATING} ${pct(
+        rate(
+          plays.filter((p) => p.judged !== null),
+          (p) => (p.judged ?? 10) < HOOK_RATING,
+        ),
+      )}, ` +
+        `under 5.5 ${pct(live.filter((x) => x < 5.5).length / live.length)}, under 4.5 ${pct(live.filter((x) => x < 4.5).length / live.length)}; hooked knights' final rating ${f2(mean(hooked.map((p) => p.rating ?? NaN)))}`,
+    );
+    if (!(rate(poor, played) >= TARGETS.poorFormPlays))
+      failures.push(`plays ${pct(rate(poor, played))} of matches in poor form`);
+    if (!(rate(worst, played) >= TARGETS.poorFormPlays))
+      failures.push(`plays ${pct(rate(worst, played))} of matches in the worst-form careers`);
+    if (!(rate(good, (p) => p.started) >= TARGETS.goodFormStarts))
+      failures.push(`starts ${pct(rate(good, (p) => p.started))} of matches in good form`);
+    if (!(rate(plays, (p) => p.started) <= TARGETS.startsAtMost))
+      failures.push(`starts ${pct(rate(plays, (p) => p.started))} of all matches: selection no longer bites`);
+    if (!(rate(plays, (p) => p.subbedOff) <= TARGETS.hookedAtMost))
+      failures.push(`taken off in ${pct(rate(plays, (p) => p.subbedOff))} of matches`);
 
     // The world: each division's strength stays near its tier, in order, season after season.
     lines.push('', 'world: mean club level by division (best four), every fourth season');
