@@ -80,6 +80,7 @@ describe("the player's match", () => {
       timeline: runner.timeline,
       goalLog: runner.goals,
       ratings: rateMatch(runner.stats),
+      stats: runner.stats,
     });
     const saved = savedByName(app.season);
     expect(saved).toEqual(ranByName(runner));

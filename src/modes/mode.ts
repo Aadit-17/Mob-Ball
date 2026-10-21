@@ -4,6 +4,7 @@ import type { KnightSpec } from '../game/match';
 import type { TeamId } from '../game/types';
 import type { House } from '../setup/houses';
 import type { MatchRatings } from '../stats/ratings';
+import type { MatchStats } from '../stats/types';
 import type { FixtureConfig, GoalLog, TimedAction } from './runner';
 
 export interface GoalRecord {
@@ -27,6 +28,8 @@ export interface MatchResult {
   readonly goalLog: readonly GoalLog[];
   /** Every knight's rating by runner id, and the man of the match, for modes that keep form. */
   readonly ratings: MatchRatings;
+  /** What every knight did, for modes that record the match through their own core. */
+  readonly stats: MatchStats;
 }
 
 export interface Dugout {
@@ -62,6 +65,10 @@ export interface MatchSession {
   readonly spectate?: boolean;
   /** The home manager's options when a watched match is paused: substitutes and one-tap tactics. */
   readonly dugout?: Dugout;
+  /** False where a result counts for a career: the pause menu offers no restart. */
+  readonly restartable?: boolean;
+  /** The player starts on the bench and may come on: the controls wait for him, and the match runs until then. */
+  readonly benched?: boolean;
   /** Buttons on the full-time screen; this is where a mode records results and moves on. */
   resultActions(result: MatchResult): readonly ResultAction[];
 }

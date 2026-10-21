@@ -75,7 +75,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   );
   const state: MatchState = runner.state;
   const duration = state.clock;
-  const human = state.knights.find((k) => k.human);
+  // Changes when a career's manager takes the player off, or brings him on from the bench.
+  let human = state.knights.find((k) => k.human);
+  let wentOff = false;
+  const controllable = human !== undefined || session.benched === true;
   let speed: (typeof SPEEDS)[number] = 1;
   const camera = new Camera();
   const effects = new Effects();
@@ -113,29 +116,28 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       },
     }),
   );
-  const watchControls = session.spectate
-    ? h(
-        'div',
-        { class: 'watch' },
-        ...speedButtons,
-        h('button', {
-          class: 'speed skip',
-          text: 'Skip',
-          attrs: { type: 'button', title: 'Skip to full time' },
-          on: {
-            click: (e) => {
-              (e.currentTarget as HTMLButtonElement).blur();
-              skipToEnd();
+  const watchControls =
+    session.spectate || controllable
+      ? h(
+          'div',
+          { class: 'watch' },
+          ...speedButtons,
+          h('button', {
+            class: 'speed skip',
+            text: 'Skip',
+            attrs: { type: 'button', title: 'Skip to full time' },
+            on: {
+              click: (e) => {
+                (e.currentTarget as HTMLButtonElement).blur();
+                skipToEnd();
+              },
             },
-          },
-        }),
-      )
-    : null;
+          }),
+        )
+      : null;
 
-  const hint = h('p', {
-    class: 'hint',
-    text: human ? KEYBOARD_HINT : '1 / 2 / 3 speed · Esc pause · M mute',
-  });
+  const WATCH_HINT = '1 / 2 / 3 speed · Esc pause · M mute';
+  const hint = h('p', { class: 'hint', text: controllable ? KEYBOARD_HINT : WATCH_HINT });
   const stage = h(
     'div',
     { class: 'stage' },
@@ -146,8 +148,8 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       { class: 'hud' },
       h('div', { class: 'board' }, blocks[0], score, blocks[1], clock),
       message,
-      ...(human ? [h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' }))] : []),
-      ...(watchControls ? [watchControls] : []),
+      ...(controllable ? [h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' }))] : []),
+      ...(watchControls && session.spectate ? [watchControls] : []),
       mute,
       h(
         'button',
@@ -179,7 +181,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   root.append(section);
 
   // Only a knight needs a stick: watched matches keep their usual layout on any device.
-  const touch = human ? new TouchControls() : null;
+  const touch = controllable ? new TouchControls() : null;
   const stopWatchingTouch = touch
     ? whenTouch(() => {
         section.classList.add('touch');
@@ -187,6 +189,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         hint.textContent = TOUCH_HINT;
       })
     : () => undefined;
+  if (controllable && !human) watching(true);
   let touchShown = '';
   /** Touch while a finger is down, else the keyboard, so a tablet with a keyboard plays either way. */
   const humanInput = (): Input => {
@@ -238,15 +241,49 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       say(`${big('GOAL!')}<div class="msg-line">${escape(line)}</div>`, 2.2);
       celebrate(event.team);
     } else if (event.type === 'substitution') {
-      const on = knightById(state, event.onId)?.look.name ?? '';
+      const cameOn = knightById(state, event.onId);
+      const on = cameOn?.look.name ?? '';
       const off = knightById(state, event.offId)?.look.name ?? '';
-      say(`${big('CHANGE')}<div class="msg-line">${escape(`${on} on, ${off} off`.toUpperCase())}</div>`, 2.2);
+      if (human?.id === event.offId) takenOff();
+      else if (cameOn?.human) {
+        human = cameOn;
+        watching(false);
+        say(`${big('YOU’RE ON')}<div class="msg-line">${escape(`FOR ${off}`.toUpperCase())}</div>`, 2.6);
+      } else
+        say(
+          `${big('CHANGE')}<div class="msg-line">${escape(`${on} on, ${off} off`.toUpperCase())}</div>`,
+          2.2,
+        );
     } else if (event.type === 'golden-goal') {
       say(`${big('GOLDEN GOAL')}<div class="msg-line">NEXT GOAL WINS</div>`, 1.8);
     } else if (event.type === 'full-time') {
       showResults();
     }
   };
+
+  /** Off the pitch (on the bench, or taken off) the controls hide and the speed buttons show; back on, 1×. */
+  function watching(on: boolean): void {
+    if (session.spectate || !watchControls) return;
+    touch?.release();
+    section.classList.toggle('is-watching', on);
+    // A skip from the bench would hand his knight to a bot if he came on: only once he's been off may he skip.
+    const skip = watchControls.querySelector<HTMLElement>('.skip');
+    if (skip) skip.hidden = human === undefined && !wentOff;
+    if (on) mute.before(watchControls);
+    else {
+      watchControls.remove();
+      setSpeed(1);
+    }
+  }
+
+  /** His manager has taken him off: the match plays on without him, and he may speed it to full time. */
+  function takenOff(): void {
+    human = undefined;
+    wentOff = true;
+    watching(true);
+    hint.textContent = `You've been taken off · ${WATCH_HINT}`;
+    say(`${big('TAKEN OFF')}<div class="msg-line">YOUR MANAGER HAS SEEN ENOUGH</div>`, 3.5);
+  }
 
   function celebrate(team: TeamId): void {
     if (reducedMotion()) return;
@@ -284,9 +321,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
           'div',
           { class: 'overlay-actions' },
           button('Continue', togglePause, 'btn-primary'),
-          button('Restart', () => {
-            app.playMatch(session);
-          }),
+          session.restartable !== false &&
+            button('Restart', () => {
+              app.playMatch(session);
+            }),
           button('Quit to home', () => {
             app.go('home');
           }),
@@ -542,7 +580,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   const keyboard = new Keyboard((key) => {
     if (key === 'Escape' || key === 'p') togglePause();
     else if (key === 'm') mute.click();
-    else if (session.spectate && (key === '1' || key === '2' || key === '3'))
+    else if (watchControls?.isConnected && (key === '1' || key === '2' || key === '3'))
       setSpeed(SPEEDS[Number(key) - 1] ?? 1);
   });
 
@@ -561,6 +599,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       timeline: runner.timeline,
       goalLog: runner.goals,
       ratings: rateMatch(runner.stats),
+      stats: runner.stats,
     };
     const [us, them] = result.score;
     const verdict = us > them ? 'Victory!' : us < them ? 'Defeat' : 'Draw';
