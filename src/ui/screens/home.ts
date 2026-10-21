@@ -2,6 +2,7 @@ import type { AppContext } from '../../app';
 import { muteButton } from '../../audio/mute-button';
 import { sound } from '../../audio/sound';
 import { LATEST } from '../../changelog/releases';
+import { prefersTouch } from '../../input/touch';
 import { MODES } from '../../modes';
 import type { GameMode } from '../../modes/mode';
 import { HOUSES } from '../../setup/houses';
@@ -134,16 +135,26 @@ export function mountHome(root: HTMLElement, app: AppContext): () => void {
       h(
         'div',
         { class: 'home-foot' },
-        h(
-          'p',
-          { class: 'hint' },
-          kbd('WASD'),
-          ' or arrows to run · ',
-          kbd('Space'),
-          ' to kick · ',
-          kbd('Shift'),
-          ' to barge. Best with a keyboard.',
-        ),
+        prefersTouch()
+          ? h(
+              'p',
+              { class: 'hint' },
+              'Drag on the left to run · hold ',
+              kbd('Kick'),
+              ' · tap ',
+              kbd('Barge'),
+              '. Turn your phone sideways for the biggest pitch.',
+            )
+          : h(
+              'p',
+              { class: 'hint' },
+              kbd('WASD'),
+              ' or arrows to run · ',
+              kbd('Space'),
+              ' to kick · ',
+              kbd('Shift'),
+              ' to barge. Best with a keyboard.',
+            ),
         muteButton('Mute sound', 'icon-btn'),
       ),
     ),

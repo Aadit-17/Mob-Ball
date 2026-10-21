@@ -1,13 +1,13 @@
 /// <reference types="node" />
 /**
  * Browser smoke test: builds the game, serves it, plays a full match in headless Chromium, starts a
- * Realm Cup, then drafts and plays two Manager matchdays. Fails on any console error or warning, and
- * reports the JS heap along the way.
+ * Realm Cup, drafts and plays two Manager matchdays, then plays with touch on a landscape phone. Fails
+ * on any console error or warning, and reports the JS heap along the way.
  *
  *   npm run smoke                                   (first run: `npx playwright install chromium`)
  *   SMOKE_URL=https://mob-ball.pages.dev npx tsx scripts/smoke.ts   (check a deployed site instead)
  */
-import { chromium, type Locator, type Page } from 'playwright';
+import { chromium, type Browser, type CDPSession, type Locator, type Page } from 'playwright';
 import { preview } from 'vite';
 import {
   drawCup,
@@ -134,6 +134,101 @@ async function playManager(page: Page): Promise<void> {
   console.log(`manager season resumed from home: ${note}`);
 }
 
+interface Finger {
+  id: number;
+  x: number;
+  y: number;
+}
+
+/** Real multi-touch through CDP: every call lists all the fingers still down, as a touchscreen does. */
+type TouchType = 'touchStart' | 'touchMove' | 'touchEnd';
+
+async function touch(cdp: CDPSession, type: TouchType, fingers: Finger[]): Promise<void> {
+  await cdp.send('Input.dispatchTouchEvent', { type, touchPoints: fingers });
+}
+
+async function centre(locator: Locator, id: number): Promise<Finger> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Touch control is not on screen');
+  return { id, x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };
+}
+
+/** Waits for the input the knight was sent from touch (the stage's data-touch-input) to match. */
+async function expectTouchInput(
+  page: Page,
+  test: (shown: string) => boolean,
+  failure: string,
+): Promise<void> {
+  const started = Date.now();
+  let shown = '';
+  while (Date.now() - started < 2000) {
+    shown = (await page.locator('.stage').getAttribute('data-touch-input')) ?? '';
+    if (test(shown)) return;
+    await page.waitForTimeout(50);
+  }
+  throw new Error(`${failure} (data-touch-input="${shown}")`);
+}
+
+/** A landscape phone: drags the stick, holds Kick with a second finger, taps Barge, pauses by tap. */
+async function playTouch(browser: Browser, baseUrl: string, problems: string[]): Promise<void> {
+  const context = await browser.newContext({
+    viewport: { width: 844, height: 390 },
+    hasTouch: true,
+    isMobile: true,
+  });
+  const page = await context.newPage();
+  page.on('console', (m) => {
+    if (m.type() === 'error' || m.type() === 'warning') problems.push(`touch ${m.type()}: ${m.text()}`);
+  });
+  page.on('pageerror', (e) => problems.push(`touch pageerror: ${e.message}`));
+  await page.goto(baseUrl);
+  await page.locator('.mode', { hasText: 'Exhibition' }).getByRole('button', { name: 'Play' }).tap();
+  await page.getByRole('button', { name: /Kick off/ }).tap();
+  await page.locator('.touch-controls').waitFor();
+  await page.locator('.gates').waitFor({ state: 'detached' });
+  await page.waitForTimeout(1800);
+
+  const cdp = await context.newCDPSession(page);
+  const thumb: Finger = { id: 1, x: 130, y: 300 };
+  const pushed: Finger = { ...thumb, x: thumb.x + 40, y: thumb.y - 12 };
+  await touch(cdp, 'touchStart', [thumb]);
+  await touch(cdp, 'touchMove', [pushed]);
+  await expectTouchInput(page, (s) => s === 'run', 'Dragging the stick did not run the knight');
+  await shot(page, 'touch-run', false);
+
+  const kick = await centre(page.locator('.tc-kick'), 2);
+  await touch(cdp, 'touchStart', [pushed, kick]);
+  await expectTouchInput(page, (s) => s === 'run kick', 'Holding Kick while running did not kick');
+  await shot(page, 'touch-run-kick', false);
+  await touch(cdp, 'touchEnd', [kick]);
+  await touch(cdp, 'touchEnd', []);
+  await expectTouchInput(page, (s) => s === '', 'Lifting both fingers did not let go');
+
+  // The barge must reach the engine: its cooldown is what empties the button's ring.
+  const charge = async (): Promise<number> =>
+    Number(await page.locator('.match').evaluate((el) => getComputedStyle(el).getPropertyValue('--p')));
+  if ((await charge()) < 1) throw new Error('Barge was not ready before the tap');
+  // A rival's barge can stun the knight for a moment, so a tap gets a few tries.
+  const barge = await centre(page.locator('.tc-barge'), 3);
+  let after = 1;
+  for (let attempt = 0; attempt < 4 && after >= 0.95; attempt++) {
+    await touch(cdp, 'touchStart', [barge]);
+    await touch(cdp, 'touchEnd', []);
+    await page.waitForTimeout(250);
+    after = await charge();
+  }
+  if (after >= 0.95) throw new Error(`Tapping Barge did not barge (ring at ${after})`);
+  console.log(`touch: stick ran, kick held, barge tapped (ring ${after.toFixed(2)})`);
+
+  await page.getByRole('button', { name: 'Pause (Esc)' }).tap();
+  await page.getByRole('button', { name: 'Continue' }).waitFor();
+  if (await page.locator('.touch-controls').isVisible())
+    throw new Error('Touch controls show over the pause menu');
+  await page.getByRole('button', { name: 'Continue' }).tap();
+  await page.locator('.touch-controls').waitFor();
+  await context.close();
+}
+
 async function main(): Promise<void> {
   const deployedUrl = process.env.SMOKE_URL;
   const server = deployedUrl ? null : await preview({ preview: { port: 4173, strictPort: true } });
@@ -173,6 +268,7 @@ async function main(): Promise<void> {
 
     await page.getByRole('button', { name: /Kick off/ }).click();
     await page.waitForSelector('canvas.pitch');
+    if (await page.locator('.touch-controls').count()) throw new Error('Touch controls show with a mouse');
     // The READY banner must appear once per kick-off, not be re-rendered every few frames.
     const bannerRenders = await page.evaluate(
       () =>
@@ -248,6 +344,7 @@ async function main(): Promise<void> {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(baseUrl);
     await playManager(page);
+    await playTouch(browser, baseUrl, problems);
   } finally {
     await browser.close();
     server?.httpServer.close();
