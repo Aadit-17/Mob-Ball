@@ -51,6 +51,13 @@ describe('form', () => {
     expect(expectedRating('gk')).toBe(RATING_FIT.gk.par);
   });
 
+  it('expects more of an outfielder the more stars he has over the rivals, and nothing more of a keeper', () => {
+    expect(RATING_FIT.outfield.perTier).toBeGreaterThan(0);
+    expect(expectedRating('fwd', 1)).toBeCloseTo(RATING_FIT.outfield.par + RATING_FIT.outfield.perTier);
+    expect(expectedRating('def', -0.5)).toBeLessThan(expectedRating('def'));
+    expect(expectedRating('gk', 1)).toBe(RATING_FIT.gk.par);
+  });
+
   it('turns a long bad run into a real drop, and a single bad match into a small one', () => {
     const one = formTiers([{ day: 4, residual: -1 }], 4);
     const run = formTiers(

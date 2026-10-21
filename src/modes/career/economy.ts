@@ -5,10 +5,11 @@ import { UPGRADE_COST, upgradeCost } from './upgrades';
 
 // Points ------------------------------------------------------------------------------------------
 
-/** No points below this rating: about 1.3 standard deviations under the mean match (6.8, sd 1). */
-export const POINT_FLOOR = 5.5;
-/** Points = scale × (rating − floor)², rounded: 6.8 earns 2, 7.5 earns 4, 8.0 earns 6, 9.0 earns 12. */
-export const POINT_SCALE = 1;
+/** No points below this rating: 1.3 standard deviations under the mean match (6.96, sd 0.77), where it was set. */
+export const POINT_FLOOR = 6;
+/** Points = scale × (rating − floor)², rounded: 7.0 earns 2, 7.5 earns 4, 8.0 earns 7, 9.0 earns 15. The scale is
+ * 1 / sd², so the curve keeps the shape in standard deviations it had when ratings ran at sd 1. */
+export const POINT_SCALE = 1.7;
 
 /** Points for one match: convex in the rating, so a standout match is worth several ordinary ones, and in proportion
  * to the share of it he played (the rating is already judged per minute, so a cameo at 8.0 earns a third of a match). */
@@ -123,9 +124,10 @@ export const FAME_MAX = 100;
 export const FAME_KEEP = 0.85;
 /** How much the same season counts towards fame in each division. */
 export const FAME_DIVISION_WEIGHT: Readonly<Record<Division, number>> = { 0: 0.4, 1: 0.7, 2: 1 };
-/** Fame a season: per rating point of season average above FAME_PAR, per goal, and per honour. */
-export const FAME_PAR = 6.5;
-export const FAME_PER_RATING = 6;
+/** Fame a season: per rating point of season average above FAME_PAR, per goal, and per honour. Par sits 0.3 sd under
+ * the mean match (6.96, sd 0.77), and a standard deviation is worth 6, as when they were set at sd 1. */
+export const FAME_PAR = 6.7;
+export const FAME_PER_RATING = 8;
 export const FAME_PER_GOAL = 0.25;
 export const FAME_PER_HONOUR: Readonly<Record<Honour, number>> = {
   title: 4,

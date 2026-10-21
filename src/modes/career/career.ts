@@ -452,10 +452,10 @@ function sheetOf(career: CareerState, club: string, mode: PlayMode, starts: bool
   };
 }
 
-/** A starting forged knight rated under this at the hour comes off: 1.8 standard deviations below the live reading's
- * mean (6.8, sd 1.0 at the hour, as for a whole match), a true stinker. scripts/career.sim.ts measures it firing in
- * about 1 start in 50; those knights end the match on about 4.6. */
-export const HOOK_RATING = 5;
+/** A starting forged knight rated under this at the hour comes off: 1.9 standard deviations below the live reading's
+ * mean (6.86, sd 0.72 at the hour), half a point under the line where a match earns nothing. scripts/career.sim.ts
+ * measures it firing in about 1 start in 100. */
+export const HOOK_RATING = 5.5;
 
 /** A club's touchline manager, and what it made of the forged knight. */
 interface Touchline extends RivalManager {
@@ -708,7 +708,11 @@ function recordFixture(
   let points = season.points;
   const rating = record.ratings[PLAYER_ID];
   if (rating !== undefined && share > 0) {
-    const expected = expectedRating(player.position);
+    const rivals = fx.sheets[1].starters;
+    const gap =
+      matchStrength(player.look.build, player.attributes) -
+      rivals.reduce((t, r) => t + r.tier, 0) / rivals.length;
+    const expected = expectedRating(player.position, gap);
     const earned = matchPoints(rating, share);
     const entry = { day: careerDay(career), residual: round2(rating - expected) };
     points += earned;
@@ -939,11 +943,14 @@ export const FAME_REACH = 0.5;
 export const OFFER_RATE = 0.5;
 export const OFFER_SCALE = 0.15;
 
-/** His worth to a club in tiers: his stars in a match, moved by how his season's ratings ran against par. */
+/** His worth to a club in tiers: his stars in a match, moved by how his season's ratings ran against what his stars
+ * predict against his division's clubs. */
 export function appeal(career: CareerState, apps: number, average: number | null): number {
-  const { player } = career;
+  const { player, world } = career;
   const strength = matchStrength(player.look.build, player.attributes);
-  const surprise = average === null ? 0 : average - expectedRating(player.position);
+  const rivals = (world.divisions[playerDivision(career)] ?? []).filter((c) => c !== player.club);
+  const level = rivals.reduce((t, c) => t + clubLevel(world, c), 0) / Math.max(1, rivals.length);
+  const surprise = average === null ? 0 : average - expectedRating(player.position, strength - level);
   const form = (apps / (apps + FORM_PRIOR)) * surprise * FORM_TIERS;
   return strength + form;
 }

@@ -8,26 +8,30 @@ import { matchGoals, tierForGoals } from './stars';
 // Form is how far the forged knight's ratings run from par, as his manager reads it: a decaying average shrunk
 // towards par, then weighed in tiers, the scale every line-up choice is made on.
 
-/** His mean rating and its spread a match, by role. scripts/career.sim.ts refits them on whole simmed careers, and
- * finds no lean on his stars or his side (outfield: +0.17 ± 0.12 a tier of stars over the rivals, +0.02 ± 0.12 a
- * tier of teammates, 1346 matches): ratings are judged per position within a match, so par is one number. */
+/** His expected rating a match and its spread, by role, refitted by scripts/career.sim.ts on whole simmed careers. Goals
+ * count in full, and a knight stars above his rivals scores more, so an outfielder's par rises `perTier` a tier of stars
+ * over their starters: form is then surprise beyond his strength, which selection counts already. Keepers: no lean. */
 export interface RatingFit {
+  /** At level strength. */
   readonly par: number;
+  readonly perTier: number;
   readonly sd: number;
 }
 
 export const RATING_FIT: Readonly<Record<'gk' | 'outfield', RatingFit>> = {
-  outfield: { par: 6.7, sd: 1.02 },
-  gk: { par: 6.67, sd: 0.88 },
+  outfield: { par: 6.93, perTier: 0.33, sd: 0.78 },
+  gk: { par: 6.96, perTier: 0, sd: 0.6 },
 };
 
 /** The forged knight's strength in a match, in tiers: his stars without stamina, which acts between matches. */
 export const matchStrength = (build: number, attributes: Attributes): number =>
   tierForGoals(matchGoals(build, attributes));
 
-/** The rating his manager expects of him in this role. */
-export const expectedRating = (role: Role): number =>
-  (role === 'gk' ? RATING_FIT.gk : RATING_FIT.outfield).par;
+/** The rating his manager expects of him in this role, `gap` tiers of stars above the rivals' starters. */
+export function expectedRating(role: Role, gap = 0): number {
+  const fit = role === 'gk' ? RATING_FIT.gk : RATING_FIT.outfield;
+  return fit.par + fit.perTier * gap;
+}
 
 /** One rating's surprise: how far it ran from par, on the matchday counted across the career. */
 export interface FormEntry {

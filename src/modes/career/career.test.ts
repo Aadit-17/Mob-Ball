@@ -29,7 +29,7 @@ import {
 } from './career';
 import { DIVISIONS, divisionOf, type Division, sameName, squadOfClub, startingWorld } from './clubs';
 import { HONOUR_POINTS, TROPHY_MIN_APPS } from './economy';
-import { formResidual } from './form';
+import { expectedRating, formResidual, matchStrength } from './form';
 import { REALM_HOUSES } from '../../setup/houses';
 import { roster } from '../../setup/rosters';
 import { normalizeCareer } from './save';
@@ -226,6 +226,16 @@ describe('real matches', () => {
     expect(record?.goals.length).toBeLessThanOrEqual((score?.[0] ?? 0) + (score?.[1] ?? 0));
     expect(after.player.stamina).toBeLessThan(c.player.stamina);
     expect(after.player.form).toHaveLength(1);
+    // Form is his rating against what his stars predict against these rivals' starters.
+    const rivals = plan.sheets[1].starters;
+    const gap =
+      matchStrength(c.player.look.build, c.player.attributes) -
+      rivals.reduce((t, r) => t + r.tier, 0) / rivals.length;
+    expect(gap).not.toBeCloseTo(0);
+    expect(after.player.form[0]?.residual).toBeCloseTo(
+      (record?.ratings[PLAYER_ID] ?? 0) - expectedRating('mid', gap),
+      2,
+    );
     expect(pendingFixtures(after)).toHaveLength(11);
     expect(normalizeCareer(JSON.parse(JSON.stringify(after)))).toEqual(after);
   });

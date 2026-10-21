@@ -28,19 +28,19 @@ const young = (points: number, attributes: Attributes = NO_ATTRIBUTES): Training
 
 describe('match points', () => {
   it('pay nothing for a poor match, a little for a typical one and much more for a standout one', () => {
-    expect(matchPoints(5)).toBe(0);
     expect(matchPoints(5.5)).toBe(0);
-    expect(matchPoints(6.8)).toBe(2);
-    expect(matchPoints(8)).toBe(6);
-    expect(matchPoints(9)).toBe(12);
-    expect(matchPoints(10)).toBe(20);
+    expect(matchPoints(6)).toBe(0);
+    expect(matchPoints(7)).toBe(2);
+    expect(matchPoints(8)).toBe(7);
+    expect(matchPoints(9)).toBe(15);
+    expect(matchPoints(10)).toBe(27);
     expect(matchPoints(Number.NaN)).toBe(0);
   });
 
   it('pay a part match for the share of it he played', () => {
     expect(matchPoints(8, 1)).toBe(matchPoints(8));
     expect(matchPoints(8, 1 / 3)).toBe(2);
-    expect(matchPoints(9, 0.5)).toBe(6);
+    expect(matchPoints(9, 0.5)).toBe(8);
     expect(matchPoints(9, 0)).toBe(0);
     expect(matchPoints(9, 1 / 3)).toBeLessThan(matchPoints(9));
   });
