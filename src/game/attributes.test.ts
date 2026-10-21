@@ -4,8 +4,8 @@ import {
   ATTRIBUTE_CAPS,
   ATTRIBUTES,
   bargeCooldownOf,
-  BARGE_CAP,
   capAttributes,
+  extraShotRange,
   fatigueFactor,
   knockbackOf,
   levelOf,
@@ -14,13 +14,16 @@ import {
   paceFactor,
   SHOT_CAP,
   shotFactor,
+  SHOT_RANGE_PER_LEVEL,
   STAMINA_CAP,
   STRENGTH_CAP,
   strengthFactor,
   stunOf,
   type Attributes,
 } from './attributes';
-import { BUILDS, KNIGHT, PITCH, STEP } from './constants';
+import { BotBrain } from '../ai/brain';
+import { skillFor } from '../ai/skills';
+import { BALL, BUILDS, KNIGHT, PITCH, STEP } from './constants';
 import { createMatch, stepMatch, type KnightSpec } from './match';
 import { collide, stepKnight } from './physics';
 import { NO_INPUT, type Role } from './types';
@@ -35,7 +38,6 @@ const MAXED: Attributes = {
   pace: PACE_CAP,
   shot: SHOT_CAP,
   strength: STRENGTH_CAP,
-  barge: BARGE_CAP,
   stamina: STAMINA_CAP,
 };
 const ROLES: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
@@ -56,6 +58,7 @@ describe('a knight without attributes', () => {
   it('has factors of exactly 1, so the engine multiplies by nothing', () => {
     expect(paceFactor(NO_ATTRIBUTES)).toBe(1);
     expect(shotFactor(NO_ATTRIBUTES)).toBe(1);
+    expect(extraShotRange(NO_ATTRIBUTES)).toBe(0);
     expect(strengthFactor(NO_ATTRIBUTES)).toBe(1);
     expect(bargeCooldownOf(NO_ATTRIBUTES)).toBe(KNIGHT.bargeCooldown);
     expect(knockbackOf(NO_ATTRIBUTES, NO_ATTRIBUTES)).toBe(KNIGHT.knockback);
@@ -107,19 +110,6 @@ describe('each attribute changes its own physics', () => {
     expect(paceFactor(only('pace', PACE_CAP))).toBeGreaterThan(1);
   });
 
-  it('shot: kicks harder, by exactly his shot factor, even past the usual top ball speed', () => {
-    const kickSpeed = (attributes: Attributes): number => {
-      const { state, home } = liveDuel({ attributes });
-      Object.assign(home, { x: 500, y: PITCH.top + 60 });
-      Object.assign(state.ball, { x: 500 + home.radius + state.ball.radius + 2, y: PITCH.top + 60 });
-      stepMatch(state, (k) => (k === home ? { ...NO_INPUT, kick: true } : NO_INPUT));
-      return Math.hypot(state.ball.vx, state.ball.vy);
-    };
-    const factor = shotFactor(only('shot', SHOT_CAP));
-    expect(kickSpeed(NO_ATTRIBUTES)).toBeCloseTo(KNIGHT.kickPower, 6);
-    expect(kickSpeed(only('shot', SHOT_CAP))).toBeCloseTo(KNIGHT.kickPower * factor, 6);
-  });
-
   it('strength: heavier, so he is moved less in a collision', () => {
     const { home, away } = liveDuel({ attributes: only('strength', STRENGTH_CAP) });
     expect(home.mass).toBeCloseTo(away.mass * strengthFactor(only('strength', STRENGTH_CAP)), 12);
@@ -152,7 +142,7 @@ describe('each attribute changes its own physics', () => {
     expect(onStrong.stun).toBeCloseTo(KNIGHT.stunDuration / ratio, 6);
   });
 
-  it('barge: barges again sooner, after exactly his cooldown', () => {
+  it('strength: barges again sooner, after exactly his cooldown', () => {
     const readyAfter = (attributes: Attributes): number => {
       const { state, home } = liveDuel({ attributes });
       Object.assign(home, { x: 300, y: 300 });
@@ -167,7 +157,7 @@ describe('each attribute changes its own physics', () => {
     };
     // Ready on the first step the cooldown has run out: within one step of it.
     const within = (a: number, b: number): boolean => Math.abs(a - b) <= STEP;
-    const quick = only('barge', BARGE_CAP);
+    const quick = only('strength', STRENGTH_CAP);
     expect(within(readyAfter(NO_ATTRIBUTES) + STEP, KNIGHT.bargeCooldown)).toBe(true);
     expect(within(readyAfter(quick) + STEP, bargeCooldownOf(quick))).toBe(true);
     expect(bargeCooldownOf(quick)).toBeLessThan(KNIGHT.bargeCooldown);
@@ -186,6 +176,77 @@ describe('each attribute changes its own physics', () => {
   });
 });
 
+describe('shot', () => {
+  const SHOOTER = only('shot', SHOT_CAP);
+  const factor = shotFactor(SHOOTER);
+  /** Speed of the ball off one kick toward the rival goal from `gap` pixels short of its line. */
+  const kickSpeed = (
+    attributes: Attributes,
+    gap: number,
+    opts: { y?: number; incoming?: number } = {},
+  ): number => {
+    const { state, home } = liveDuel({ attributes });
+    const y = opts.y ?? PITCH.centerY;
+    const ballX = PITCH.right - gap;
+    Object.assign(home, { x: ballX - home.radius - BALL.radius - 1, y });
+    Object.assign(state.ball, { x: ballX, y, vx: 0, vy: opts.incoming ?? 0 });
+    Object.assign(state.knights[1] ?? {}, { x: PITCH.left + 40, y: PITCH.top + 40 });
+    stepMatch(state, (k) => (k === home ? { ...NO_INPUT, kick: true } : NO_INPUT));
+    return Math.hypot(state.ball.vx, state.ball.vy);
+  };
+  const boosted = KNIGHT.kickPower * KNIGHT.shotBoost;
+
+  it('adds power to a close-range shot, by exactly his shot factor', () => {
+    expect(kickSpeed(NO_ATTRIBUTES, 300)).toBeCloseTo(boosted, 6);
+    expect(kickSpeed(SHOOTER, 300)).toBeCloseTo(boosted * factor, 6);
+  });
+
+  it('keeps the shot boost further out: from beyond the usual range, only the trained shooter gets it', () => {
+    const range = KNIGHT.shotRange + extraShotRange(SHOOTER);
+    expect(range).toBe(KNIGHT.shotRange + SHOT_RANGE_PER_LEVEL * SHOT_CAP);
+    const long = KNIGHT.shotRange + (range - KNIGHT.shotRange) / 2;
+    expect(kickSpeed(NO_ATTRIBUTES, long)).toBeCloseTo(KNIGHT.kickPower, 6);
+    expect(kickSpeed(SHOOTER, long)).toBeCloseTo(boosted * factor, 6);
+    // Past his range, a kick is a plain kick for him too.
+    expect(kickSpeed(SHOOTER, range + 30)).toBeCloseTo(KNIGHT.kickPower, 6);
+  });
+
+  it('lifts the ball past the usual top speed on a one-touch shot, by exactly his shot factor', () => {
+    const top = BALL.maxSpeed * KNIGHT.shotBoost * KNIGHT.oneTouchBoost;
+    expect(kickSpeed(NO_ATTRIBUTES, 200, { incoming: 1400 })).toBeCloseTo(top, 6);
+    expect(kickSpeed(SHOOTER, 200, { incoming: 1400 })).toBeCloseTo(top * factor, 6);
+  });
+
+  it('leaves passes alone: a kick away from goal goes exactly as hard as an untrained one', () => {
+    const pass = kickSpeed(SHOOTER, 300, { y: PITCH.top + 60 });
+    expect(pass).toBe(kickSpeed(NO_ATTRIBUTES, 300, { y: PITCH.top + 60 }));
+    expect(pass).toBeCloseTo(KNIGHT.kickPower, 6);
+  });
+
+  it('makes the bot shoot from his own range: a trained shooter shoots from where an untrained one carries on', () => {
+    /** How far from the goal line the bot's first kick was, given an open pitch from `gap` out. */
+    const firstKickFrom = (attributes: Attributes, gap: number): number => {
+      const { state, home, away } = liveDuel({ attributes, tier: 2 });
+      Object.assign(home, { x: PITCH.right - gap - home.radius - BALL.radius - 1, y: PITCH.centerY });
+      Object.assign(state.ball, { x: PITCH.right - gap, y: PITCH.centerY, vx: 0, vy: 0 });
+      Object.assign(away, { x: PITCH.left + 40, y: PITCH.bottom - 30 });
+      const brain = new BotBrain();
+      for (let t = 0; t < 3; t += STEP) {
+        stepMatch(state, (k) => (k === home ? brain.input(state, k) : NO_INPUT));
+        const kick = state.events.find((e) => e.type === 'kick' && e.knightId === home.id);
+        if (kick?.type === 'kick') return PITCH.right - kick.x;
+      }
+      return -1;
+    };
+    const plainRange = skillFor(2).shotRange;
+    const gap = plainRange + extraShotRange(SHOOTER) * 0.6;
+    expect(firstKickFrom(SHOOTER, gap)).toBeGreaterThan(plainRange);
+    const untrained = firstKickFrom(NO_ATTRIBUTES, gap);
+    expect(untrained).toBeGreaterThan(0);
+    expect(untrained).toBeLessThanOrEqual(plainRange);
+  });
+});
+
 describe('levels', () => {
   it('are whole and capped, so a bad save can never buy more than the cap', () => {
     for (const a of ATTRIBUTES) {
@@ -194,11 +255,10 @@ describe('levels', () => {
       expect(levelOf(only(a, 2.7), a)).toBe(2);
       expect(levelOf(only(a, Number.NaN), a)).toBe(0);
     }
-    expect(capAttributes({ pace: 99, shot: -1, strength: 3.5, barge: 4, stamina: Infinity })).toEqual({
+    expect(capAttributes({ pace: 99, shot: -1, strength: 3.5, stamina: Infinity })).toEqual({
       pace: PACE_CAP,
       shot: 0,
       strength: 3,
-      barge: 4,
       stamina: 0,
     });
   });
@@ -209,6 +269,9 @@ describe('levels', () => {
     expect(strengthFactor(only('strength', STRENGTH_CAP + 4))).toBe(
       strengthFactor(only('strength', STRENGTH_CAP)),
     );
-    expect(bargeCooldownOf(only('barge', BARGE_CAP + 4))).toBe(bargeCooldownOf(only('barge', BARGE_CAP)));
+    expect(extraShotRange(only('shot', SHOT_CAP + 4))).toBe(extraShotRange(only('shot', SHOT_CAP)));
+    expect(bargeCooldownOf(only('strength', STRENGTH_CAP + 4))).toBe(
+      bargeCooldownOf(only('strength', STRENGTH_CAP)),
+    );
   });
 });

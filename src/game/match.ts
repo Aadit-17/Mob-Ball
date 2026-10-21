@@ -1,5 +1,6 @@
 import type { Look } from '../knight/look';
 import {
+  extraShotRange,
   knockbackOf,
   NO_ATTRIBUTES,
   shotFactor,
@@ -248,13 +249,13 @@ export function kickDirection(state: MatchState, k: Knight): { x: number; y: num
   return { x: ux, y: uy, distance };
 }
 
-/** Whether a kick in direction `dir` from the ball's spot is a close-range shot on the rival goal. */
-function isShotAtGoal(state: MatchState, team: TeamId, dir: { x: number; y: number }): boolean {
+/** Whether a kick by `k` in direction `dir` from the ball's spot is a shot on the rival goal within his range. */
+function isShotAtGoal(state: MatchState, k: Knight, dir: { x: number; y: number }): boolean {
   const { ball } = state;
-  const lineX = team === 0 ? PITCH.right : PITCH.left;
+  const lineX = k.team === 0 ? PITCH.right : PITCH.left;
   const toLine = lineX - ball.x;
-  if (Math.abs(toLine) > KNIGHT.shotRange || Math.sign(dir.x) !== Math.sign(toLine) || dir.x === 0)
-    return false;
+  const range = KNIGHT.shotRange + extraShotRange(k.attributes);
+  if (Math.abs(toLine) > range || Math.sign(dir.x) !== Math.sign(toLine) || dir.x === 0) return false;
   const y = ball.y + (dir.y * toLine) / dir.x;
   return y > PITCH.goalTop && y < PITCH.goalBottom;
 }
@@ -269,9 +270,10 @@ function tryKick(state: MatchState, k: Knight, incoming: Incoming): void {
   const dir = kickDirection(state, k);
   if (dir.distance > k.radius + state.ball.radius + KNIGHT.kickReach) return;
   const oneTouch = incoming.toucher !== k.id && incoming.speed >= KNIGHT.oneTouchMinSpeed;
-  const boost =
-    (isShotAtGoal(state, k.team, dir) ? KNIGHT.shotBoost : 1) * (oneTouch ? KNIGHT.oneTouchBoost : 1);
-  const shot = shotFactor(k.attributes);
+  const atGoal = isShotAtGoal(state, k, dir);
+  const boost = (atGoal ? KNIGHT.shotBoost : 1) * (oneTouch ? KNIGHT.oneTouchBoost : 1);
+  // Shot power is for shots: on a pass it only overhits the ball.
+  const shot = atGoal ? shotFactor(k.attributes) : 1;
   const power = KNIGHT.kickPower * k.build.kick * shot * boost;
   state.ball.vx += dir.x * power;
   state.ball.vy += dir.y * power;

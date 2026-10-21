@@ -184,87 +184,93 @@ function combination(fit: { beta: number[]; cov: number[][] }, weights: readonly
 }
 
 const FIT_MATCHES = Number(process.env.FIT_MATCHES ?? 40_000);
+/** The fit alone outlasts the harness's ten-minute default on a busy machine. */
+const FIT_TIMEOUT = 3_600_000;
 /** The four stats a match reads; stamina only acts between matches. */
-const MATCH_STATS = ['pace', 'shot', 'strength', 'barge'] as const satisfies readonly Attribute[];
+const MATCH_STATS = ['pace', 'shot', 'strength'] as const satisfies readonly Attribute[];
 
 if (!isMatchWorker)
-  it('attributes fit', async () => {
-    // Every match puts a forged knight with a random build and random levels on each side, in the same role;
-    // goal difference is then fitted on the differences, so all four stats come from the same matches.
-    const rng = createRng(1415);
-    const random = (): ReturnType<typeof subject> =>
-      subject(
-        rng.int(3),
-        Object.fromEntries(
-          ATTRIBUTES.map((a) => [a, rng.int(ATTRIBUTE_CAPS[a] + 1)]),
-        ) as unknown as Attributes,
+  it(
+    'attributes fit',
+    async () => {
+      // Every match puts a forged knight with a random build and random levels on each side, in the same role;
+      // goal difference is then fitted on the differences, so all three match stats come from the same matches.
+      const rng = createRng(1415);
+      const random = (): ReturnType<typeof subject> =>
+        subject(
+          rng.int(3),
+          Object.fromEntries(
+            ATTRIBUTES.map((a) => [a, rng.int(ATTRIBUTE_CAPS[a] + 1)]),
+          ) as unknown as Attributes,
+        );
+      const draws = Array.from({ length: FIT_MATCHES }, (_, i) => ({
+        seed: 60_000 + i,
+        home: random(),
+        away: random(),
+      }));
+      const fixtures = draws.map(({ seed, home, away }) => {
+        const role = OUTFIELD[seed % OUTFIELD.length] ?? 'mid';
+        return { seed, home: lineup(seed, role, home), away: lineup(seed + 3, role, away) };
+      });
+      const scores = await playAll(fixtures);
+      const row = (k: ReturnType<typeof subject>): number[] => {
+        const levels = MATCH_STATS.map((a) => levelOf(k.attributes ?? NO_ATTRIBUTES, a));
+        return [k.build === 0 ? 1 : 0, k.build === 2 ? 1 : 0, ...levels, ...levels.map((l) => l * l)];
+      };
+      const xs = draws.map(({ home, away }) => {
+        const [h, a] = [row(home), row(away)];
+        return [1, ...h.map((v, j) => v - (a[j] ?? 0))];
+      });
+      const ys = scores.map(([h, a]) => h - a);
+      const quadratic = leastSquares(xs, ys);
+      const linear = leastSquares(
+        xs.map((x) => x.slice(0, 3 + MATCH_STATS.length)),
+        ys,
       );
-    const draws = Array.from({ length: FIT_MATCHES }, (_, i) => ({
-      seed: 60_000 + i,
-      home: random(),
-      away: random(),
-    }));
-    const fixtures = draws.map(({ seed, home, away }) => {
-      const role = OUTFIELD[seed % OUTFIELD.length] ?? 'mid';
-      return { seed, home: lineup(seed, role, home), away: lineup(seed + 3, role, away) };
-    });
-    const scores = await playAll(fixtures);
-    const row = (k: ReturnType<typeof subject>): number[] => {
-      const levels = MATCH_STATS.map((a) => levelOf(k.attributes ?? NO_ATTRIBUTES, a));
-      return [k.build === 0 ? 1 : 0, k.build === 2 ? 1 : 0, ...levels, ...levels.map((l) => l * l)];
-    };
-    const xs = draws.map(({ home, away }) => {
-      const [h, a] = [row(home), row(away)];
-      return [1, ...h.map((v, j) => v - (a[j] ?? 0))];
-    });
-    const ys = scores.map(([h, a]) => h - a);
-    const quadratic = leastSquares(xs, ys);
-    const linear = leastSquares(
-      xs.map((x) => x.slice(0, 3 + MATCH_STATS.length)),
-      ys,
-    );
-    const names = ['home side', 'Nimble v Standard', 'Hefty v Standard'];
-    const out = [
-      `Attributes fit: ${FIT_MATCHES} matches, goal difference a match, ± 2 SE`,
-      '',
-      'Linear in level:',
-    ];
-    names.forEach((name, i) => {
-      const [v, e] = combination(
-        linear,
-        names.map((_, j) => (j === i ? 1 : 0)).concat(MATCH_STATS.map(() => 0)),
-      );
-      out.push(`  ${name.padEnd(20)} ${signed(v)} ± ${e.toFixed(3)}`);
-    });
-    MATCH_STATS.forEach((a, i) => {
-      const w = (scale: number): number[] => [0, 0, 0, ...MATCH_STATS.map((_, j) => (j === i ? scale : 0))];
-      const [v, e] = combination(linear, w(1));
-      const [c, ce] = combination(linear, w(ATTRIBUTE_CAPS[a]));
-      out.push(
-        `  ${a.padEnd(20)} ${signed(v)} ± ${e.toFixed(3)} a level, at cap ${signed(c)} ± ${ce.toFixed(3)}`,
-      );
-    });
-    out.push('', 'With a squared term (curvature):');
-    MATCH_STATS.forEach((a, i) => {
-      const w = (lin: number, sq: number): number[] => [
-        0,
-        0,
-        0,
-        ...MATCH_STATS.map((_, j) => (j === i ? lin : 0)),
-        ...MATCH_STATS.map((_, j) => (j === i ? sq : 0)),
+      const names = ['home side', 'Nimble v Standard', 'Hefty v Standard'];
+      const out = [
+        `Attributes fit: ${FIT_MATCHES} matches, goal difference a match, ± 2 SE`,
+        '',
+        'Linear in level:',
       ];
-      const cap = ATTRIBUTE_CAPS[a];
-      const [l, le] = combination(quadratic, w(1, 0));
-      const [q, qe] = combination(quadratic, w(0, 1));
-      const [half, he] = combination(quadratic, w(cap / 2, (cap / 2) ** 2));
-      const [c, ce] = combination(quadratic, w(cap, cap * cap));
-      out.push(
-        `  ${a.padEnd(10)} level ${signed(l)} ± ${le.toFixed(3)}, squared ${signed(q)} ± ${qe.toFixed(4)};` +
-          ` half cap ${signed(half)} ± ${he.toFixed(3)}, cap ${signed(c)} ± ${ce.toFixed(3)}`,
-      );
-    });
-    console.log(`\n${out.join('\n')}\n`);
-  });
+      names.forEach((name, i) => {
+        const [v, e] = combination(
+          linear,
+          names.map((_, j) => (j === i ? 1 : 0)).concat(MATCH_STATS.map(() => 0)),
+        );
+        out.push(`  ${name.padEnd(20)} ${signed(v)} ± ${e.toFixed(3)}`);
+      });
+      MATCH_STATS.forEach((a, i) => {
+        const w = (scale: number): number[] => [0, 0, 0, ...MATCH_STATS.map((_, j) => (j === i ? scale : 0))];
+        const [v, e] = combination(linear, w(1));
+        const [c, ce] = combination(linear, w(ATTRIBUTE_CAPS[a]));
+        out.push(
+          `  ${a.padEnd(20)} ${signed(v)} ± ${e.toFixed(3)} a level, at cap ${signed(c)} ± ${ce.toFixed(3)}`,
+        );
+      });
+      out.push('', 'With a squared term (curvature):');
+      MATCH_STATS.forEach((a, i) => {
+        const w = (lin: number, sq: number): number[] => [
+          0,
+          0,
+          0,
+          ...MATCH_STATS.map((_, j) => (j === i ? lin : 0)),
+          ...MATCH_STATS.map((_, j) => (j === i ? sq : 0)),
+        ];
+        const cap = ATTRIBUTE_CAPS[a];
+        const [l, le] = combination(quadratic, w(1, 0));
+        const [q, qe] = combination(quadratic, w(0, 1));
+        const [half, he] = combination(quadratic, w(cap / 2, (cap / 2) ** 2));
+        const [c, ce] = combination(quadratic, w(cap, cap * cap));
+        out.push(
+          `  ${a.padEnd(10)} level ${signed(l)} ± ${le.toFixed(3)}, squared ${signed(q)} ± ${qe.toFixed(4)};` +
+            ` half cap ${signed(half)} ± ${he.toFixed(3)}, cap ${signed(c)} ± ${ce.toFixed(3)}`,
+        );
+      });
+      console.log(`\n${out.join('\n')}\n`);
+    },
+    FIT_TIMEOUT,
+  );
 
 const BASE_PAIRS = Number(process.env.BASE_PAIRS ?? 3000);
 
@@ -289,6 +295,31 @@ if (!isMatchWorker)
       out.push(
         `  ${skillFor(tier).name.padEnd(10)} ${signed(mean(d))} ± ${twoSe(d).toFixed(3)}   (draft fit, mixed line-ups: ${signed(OUTFIELD_TIER_VALUE[tier] ?? 0)})`,
       );
+    }
+    console.log(`\n${out.join('\n')}\n`);
+  });
+
+const SINGLE_PAIRS = Number(process.env.SINGLE_PAIRS ?? 3000);
+/** Comma-separated stats for the single block (all match stats by default), so one can be checked alone. */
+const SINGLE_STATS = (process.env.SINGLE_STATS?.split(',') ?? MATCH_STATS).filter((a): a is Attribute =>
+  (ATTRIBUTES as readonly string[]).includes(a),
+);
+
+if (!isMatchWorker)
+  it('attributes single', async () => {
+    // Each stat alone at its cap against the same knight untrained: a direct check on the fit, no model.
+    const out = [
+      `Each stat alone at its cap v untrained (Standard): ${SINGLE_PAIRS} mirrored seed pairs, ± 2 SE`,
+    ];
+    for (const [i, a] of SINGLE_STATS.entries()) {
+      const capped = { ...NO_ATTRIBUTES, [a]: ATTRIBUTE_CAPS[a] };
+      const d = await compare(
+        subject(1, capped),
+        subject(1, NO_ATTRIBUTES),
+        SINGLE_PAIRS,
+        90_000 + i * 10_000,
+      );
+      out.push(`  ${a.padEnd(10)} ${signed(mean(d))} ± ${twoSe(d).toFixed(3)}`);
     }
     console.log(`\n${out.join('\n')}\n`);
   });

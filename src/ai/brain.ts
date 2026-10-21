@@ -1,3 +1,4 @@
+import { extraShotRange } from '../game/attributes';
 import { BALL, PITCH, STEP } from '../game/constants';
 import type { Input, Knight, MatchState } from '../game/types';
 import { clamp, dist, type Vec } from '../game/vec';
@@ -652,7 +653,8 @@ function carry(ctx: Context): Plan {
   const { skill, ball, self } = ctx;
   const shooting = SHOOTING[ctx.tactics.shooting];
   const shot = shotTarget(ctx);
-  const far = dist(ball, shot) > skill.shotRange * shooting.range;
+  // A trained shooter keeps his boost from further out, so he shoots from there too.
+  const far = dist(ball, shot) > (skill.shotRange + extraShotRange(self.attributes)) * shooting.range;
   const onBall = ctx.ballDistance < self.radius + BALL.radius + 60;
   const shotBlocked = blocked(ctx, ball, shot);
 

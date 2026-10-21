@@ -15,7 +15,7 @@ export interface ForgedKnight {
 }
 
 /** The sim's decisions for the forged knight, fixed: raising them with his stars counts training twice (a maxed
- * knight on a Legend brain measured +1.40 ± 0.07 goals over this one). His stars come from his body alone. */
+ * knight on a Legend brain measured +1.38 ± 0.08 goals over this one). Only his shot range moves one decision. */
 export const SIM_BRAIN_TIER = FORGED_TIER;
 
 export type MatchAttribute = Exclude<Attribute, 'stamina'>;
@@ -24,15 +24,14 @@ export type MatchAttribute = Exclude<Attribute, 'stamina'>;
 // goal difference a match against a Knight-tier bot in that place, ± 2 SE. Per knight, as OUTFIELD_TIER_VALUE.
 /** Untrained and Standard: +0.238 ± 0.045 (3000 mirrored seed pairs). */
 export const FORGED_BASE_GOALS = 0.238;
-/** Nimble, Standard, Hefty, from the fit below: +0.172 ± 0.031, 0, -0.227 ± 0.031. */
-export const FORGED_BUILD_GOALS: readonly number[] = [0.172, 0, -0.227];
-/** Linear in level (squared terms fit to zero within 2 SE), 40,000 matches of random builds and levels:
- * pace +0.045, shot +0.008, strength +0.026, barge +0.005 a level, each ± 0.004 (± 0.040 at the cap). */
+/** Nimble, Standard, Hefty, from the fit below: +0.182 ± 0.032, 0, -0.213 ± 0.032. */
+export const FORGED_BUILD_GOALS: readonly number[] = [0.182, 0, -0.213];
+/** Linear in level (squared terms fit to zero within 2 SE), 40,000 matches of random builds and levels, caps of 8:
+ * pace +0.044, shot +0.035, strength +0.034 a level, each ± 0.005 (± 0.040 at the cap). */
 export const GOALS_PER_LEVEL: Readonly<Record<MatchAttribute, number>> = {
-  pace: 0.045,
-  shot: 0.008,
-  strength: 0.026,
-  barge: 0.005,
+  pace: 0.044,
+  shot: 0.035,
+  strength: 0.034,
 };
 /** Each tier as a bot in that same place, 2000 pairs each, ± 0.06: worth more there than in the draft's mixed
  * line-ups (-0.71, -0.03, 0, +0.65, +1.00), so stars are read off these to keep both sides in one context. */

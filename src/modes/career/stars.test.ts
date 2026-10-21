@@ -101,7 +101,7 @@ describe('overall stars', () => {
 describe('the forged knight on the pitch', () => {
   const knight: ForgedKnight = {
     look: { ...DEFAULT_LOOK, build: 2 },
-    attributes: { pace: 4, shot: 3, strength: 7, barge: 2, stamina: 5 },
+    attributes: { pace: 4, shot: 3, strength: 7, stamina: 5 },
   };
 
   it('when simmed, is a bot with the measured brain on the human legs, carrying his training', () => {
