@@ -151,7 +151,7 @@ const mirrorX = (team: number, x: number): number => (team === 0 ? x : PITCH.wid
 /** The last toucher still has the ball while it is this close to him. */
 const CARRY_REACH = 60;
 /** Gap between a knight's edge and the ball inside which it has the ball, touched or not. */
-const CONTROL_GAP = 12;
+export const CONTROL_GAP = 12;
 
 /** Seconds a change of possession must last before off-ball bots switch between attacking and defending. */
 const TRANSITION_SETTLE = 0.3;
@@ -168,7 +168,7 @@ function settledPossession(memory: Memory, ours: boolean, now: number): boolean 
 }
 
 /** Who has the ball: its last toucher while still close to it, otherwise any knight touching it. */
-function carrierOf(state: MatchState): Knight | null {
+export function carrierOf(state: MatchState): Knight | null {
   const { ball, knights } = state;
   const toucher = knights.find((k) => k.id === ball.lastTouch);
   if (toucher && dist(toucher, ball) < CARRY_REACH) return toucher;

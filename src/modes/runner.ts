@@ -3,6 +3,8 @@ import { BOTH_DEFAULT, withTactics, type Tactics, type TeamTactics } from '../ai
 import { STEP } from '../game/constants';
 import { createMatch, stepMatch, substitute, swapRoles, type KnightSpec } from '../game/match';
 import type { Input, Knight, MatchState, TeamId } from '../game/types';
+import { StatsRecorder } from '../stats/recorder';
+import type { MatchStats } from '../stats/types';
 
 /** A change from the touchline. */
 export type ManagerAction =
@@ -56,6 +58,7 @@ export class MatchRunner {
   private readonly recorded: TimedAction[] = [];
   private readonly scored: GoalLog[] = [];
   private readonly scheduled: readonly TimedAction[];
+  private readonly recorder: StatsRecorder;
 
   constructor(
     private readonly config: FixtureConfig,
@@ -70,6 +73,7 @@ export class MatchRunner {
     this.tactics = config.tactics ?? BOTH_DEFAULT;
     this.brain = new BotBrain(this.tactics);
     this.scheduled = [...scheduled].sort((a, b) => a.step - b.step);
+    this.recorder = new StatsRecorder(this.state);
   }
 
   get step(): number {
@@ -98,6 +102,11 @@ export class MatchRunner {
     return this.scored;
   }
 
+  /** What every knight did so far; complete once the match has ended. The same however it was played. */
+  get stats(): MatchStats {
+    return this.recorder.stats;
+  }
+
   act(team: TeamId, action: ManagerAction): void {
     this.pending.push({ team, action });
   }
@@ -116,16 +125,21 @@ export class MatchRunner {
       });
     }
 
+    const before = this.state.events.length;
     stepMatch(this.state, (k) => human?.(k) ?? this.brain.input(this.state, k));
-    for (const e of this.state.events)
+    const fresh = this.state.events.slice(before);
+    for (const e of fresh)
       if (e.type === 'goal')
         this.scored.push({ team: e.team, scorerId: e.scorerId, ownGoal: e.ownGoal, step: this.steps });
-    this.steps++;
+    const step = this.steps++;
     if (this.state.goldenGoal && ++this.goldenSteps > GOLDEN_GOAL_LIMIT) {
       // Never seen in testing; settle it by lot so a season or bracket can always go on.
-      this.state.score[this.state.rng.next() < 0.5 ? 0 : 1] += 1;
+      const team = this.state.rng.next() < 0.5 ? 0 : 1;
+      this.state.score[team] += 1;
       this.state.phase = 'ended';
+      this.recorder.decidedByLot(team);
     }
+    this.recorder.observe(this.state, step, fresh);
   }
 
   /** Plays up to `steps` steps without drawing; events are discarded. */
