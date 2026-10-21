@@ -46,7 +46,8 @@ export const squadKnightSpec = (knight: SquadKnight, stamina: number, role: Role
 /** Expected strength in tiers, the scale every line-up and substitution choice is made on. */
 const strength = (tier: number, stamina: number): number => tier - TIRED_TIER_COST * deficit(stamina);
 
-const tiredCost = (stamina: number): number => TIRED_TIER_COST * deficit(stamina);
+/** What tiredness costs, in tiers. */
+export const tiredCost = (stamina: number): number => TIRED_TIER_COST * deficit(stamina);
 
 /** The one substitution of a match: who went off, who came on, and the simulation step it happened. */
 export interface Substitution {
