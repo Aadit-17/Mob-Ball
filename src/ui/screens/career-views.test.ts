@@ -169,7 +169,9 @@ describe('the season in review', () => {
   it('heads the season with the proudest thing first', () => {
     const summary = endSeason(fakeSeason(start(), () => ({ score: [1, 1], player: 6.5 }))).history[0];
     if (!summary) throw new Error('no summary');
+    expect(seasonVerdict({ ...summary, honours: ['title', 'royalCall', 'royalCrown'] })).toBe('crown');
     expect(seasonVerdict({ ...summary, honours: ['promotion', 'title', 'topScorer'] })).toBe('title');
+    expect(seasonVerdict({ ...summary, honours: ['royalCall'], relegated: true })).toBe('royal');
     expect(seasonVerdict({ ...summary, honours: ['topScorer', 'promotion'] })).toBe('promotion');
     expect(seasonVerdict({ ...summary, honours: ['topScorer'], relegated: true })).toBe('boot');
     expect(seasonVerdict({ ...summary, honours: [], relegated: true })).toBe('relegated');

@@ -22,6 +22,7 @@ import {
   placeLevel,
   PLAYER_ID,
   playerDivision,
+  ROYAL_RIVAL_TIERS,
   trainPlayer,
   type CareerPlayer,
   type CareerState,
@@ -220,12 +221,15 @@ export function bestMatch(career: CareerState, division: Division, club: string)
 }
 
 /** The season's headline, the proudest thing first. */
-export type Verdict = 'title' | 'promotion' | 'boot' | 'relegated' | 'finish';
+export type Verdict = 'crown' | 'title' | 'promotion' | 'boot' | 'royal' | 'relegated' | 'finish';
 
 export function seasonVerdict(summary: SeasonSummary): Verdict {
-  if (summary.honours.includes('title')) return 'title';
-  if (summary.honours.includes('promotion')) return 'promotion';
-  if (summary.honours.includes('topScorer')) return 'boot';
+  const won = (honour: Honour): boolean => summary.honours.includes(honour);
+  if (won('royalCrown')) return 'crown';
+  if (won('title')) return 'title';
+  if (won('promotion')) return 'promotion';
+  if (won('topScorer')) return 'boot';
+  if (won('royalCall')) return 'royal';
   return summary.relegated ? 'relegated' : 'finish';
 }
 
@@ -274,6 +278,9 @@ export function clubSpells(history: readonly SeasonSummary[]): Spell[] {
 
 /** Seasons are counted from 1 on screen. */
 export const seasonLabel = (season: number): string => `Season ${season + 1}`;
+
+/** The royal tournament's rounds, as the core plays them. */
+const ROYAL_ROUNDS = ROYAL_RIVAL_TIERS.length;
 
 // Pieces ---------------------------------------------------------------------------------------------
 
@@ -773,11 +780,34 @@ export function offersView(
 
 // Season review --------------------------------------------------------------------------------------
 
-function headline(summary: SeasonSummary): { ribbon: string; title: string; line: string; proud: boolean } {
+interface Headline {
+  readonly ribbon: string;
+  readonly title: string;
+  readonly line: string;
+  /** Worth the champion stage: an honour won. */
+  readonly honour: Honour | null;
+}
+
+function headline(summary: SeasonSummary): Headline {
   const club = clubName(summary.club);
   const division = DIVISION_NAMES[summary.division];
   const up = DIVISION_NAMES[clamp(summary.division + 1, 0, TOP_DIVISION) as Division];
+  const finished = `${club} finish ${ordinal(summary.finish)} in the ${division}`;
   switch (seasonVerdict(summary)) {
+    case 'crown':
+      return {
+        ribbon: 'Crowned',
+        title: 'Crowned for the realm',
+        line: `The royal side won the royal tournament. ${finished}.`,
+        honour: 'royalCrown',
+      };
+    case 'royal':
+      return {
+        ribbon: 'Royal call-up',
+        title: 'Called to the royal squad',
+        line: `${finished}, and the realm came calling.`,
+        honour: 'royalCall',
+      };
     case 'title':
       return {
         ribbon: 'Champions',
@@ -786,35 +816,35 @@ function headline(summary: SeasonSummary): { ribbon: string; title: string; line
           summary.division < TOP_DIVISION
             ? `${club} top the ${division} and go up to the ${up}.`
             : `${club} are the finest house in the realm.`,
-        proud: true,
+        honour: 'title',
       };
     case 'promotion':
       return {
         ribbon: 'Promoted',
         title: `Up to the ${up}`,
         line: `${club} finish ${ordinal(summary.finish)} and go up.`,
-        proud: true,
+        honour: 'promotion',
       };
     case 'boot':
       return {
         ribbon: 'Golden Boot',
         title: 'Top scorer',
-        line: `${club} finish ${ordinal(summary.finish)} in the ${division}, and nobody scored more.`,
-        proud: true,
+        line: `${finished}, and nobody scored more.`,
+        honour: 'topScorer',
       };
     case 'relegated':
       return {
         ribbon: 'Relegated',
         title: `Finished ${ordinal(summary.finish)}`,
         line: `${club} go down to the ${DIVISION_NAMES[(summary.division - 1) as Division]}.`,
-        proud: false,
+        honour: null,
       };
     case 'finish':
       return {
         ribbon: 'Season over',
         title: `Finished ${ordinal(summary.finish)}`,
         line: `${club} finish ${ordinal(summary.finish)} of 8 in the ${division}.`,
-        proud: false,
+        honour: null,
       };
   }
 }
@@ -963,7 +993,9 @@ function royalLine(royal: RoyalResult): HTMLElement {
       {},
       h('b', { text: royal.crowned ? 'Crowned with the royal squad' : 'Called to the royal squad' }),
       h('span', {
-        text: `${plural(wins, 'win')} in ${plural(royal.matches.length, 'match', 'matches')} at the royal tournament · ${royalOutcome(royal, Math.max(3, royal.matches.length))}.`,
+        text: royal.crowned
+          ? `${plural(wins, 'win')} from ${plural(royal.matches.length, 'match', 'matches')}: the crown comes home.`
+          : `${plural(wins, 'win')} in ${plural(royal.matches.length, 'match', 'matches')} at the royal tournament · ${royalOutcome(royal, Math.max(ROYAL_ROUNDS, royal.matches.length))}.`,
       }),
     ),
   );
@@ -988,39 +1020,51 @@ export function seasonReviewView(career: CareerState, onContinue: () => void): H
   }
   const club = clubById(summary.club);
   const say = headline(summary);
-  const top = h(
-    'div',
-    { class: say.proud ? 'cup-champion cv-hero panel' : 'cup-verdict cv-hero panel' },
-    h('p', { class: 'ribbon', text: `${seasonLabel(summary.season)} · ${say.ribbon}` }),
-    say.proud
-      ? h(
+  const meta = h(
+    'p',
+    { class: 'cv-meta' },
+    clubShield(summary.club),
+    h('span', { text: `${club.name} · ${DIVISION_NAMES[summary.division]} · age ${summary.age}` }),
+  );
+  const actions = h('div', { class: 'cup-actions' }, button('Continue', onContinue, 'btn-primary'));
+  const ribbon = h('p', { class: 'ribbon', text: `${seasonLabel(summary.season)} · ${say.ribbon}` });
+  const line = h('p', { class: 'cup-level', text: say.line });
+  const top = say.honour
+    ? h(
+        'div',
+        { class: 'cup-champion cv-hero panel' },
+        ribbon,
+        h(
           'div',
           { class: 'champion-stage' },
-          h('span', { class: 'champion-cup' }, honourIcon(summary.honours[0] ?? 'title')),
+          h('span', { class: 'champion-cup' }, honourIcon(say.honour)),
           h(
             'div',
             { class: 'plinth', attrs: { style: `--house: ${club.colour}` } },
             h('div', { class: 'plinth-shield' }),
             portraitCanvas(career.player.look, club.colour, 172, 196, 'home-portrait'),
           ),
-          h('span', { class: 'champion-cup' }, honourIcon(summary.honours[0] ?? 'title')),
-        )
-      : h(
+          h('span', { class: 'champion-cup' }, honourIcon(say.honour)),
+        ),
+        h('h2', { class: 'metal cup-title', text: say.title, attrs: { 'data-text': say.title } }),
+        line,
+        meta,
+        actions,
+      )
+    : h(
+        'div',
+        { class: 'cup-verdict cv-hero panel' },
+        ribbon,
+        h(
           'div',
           { class: 'cv-hero-row' },
           clubCrest(summary.club, 'md'),
           h('h2', { class: 'verdict', text: say.title }),
         ),
-    say.proud && h('h2', { class: 'metal cup-title', text: say.title, attrs: { 'data-text': say.title } }),
-    h('p', { class: 'cup-level', text: say.line }),
-    h(
-      'p',
-      { class: 'cv-meta' },
-      clubShield(summary.club),
-      h('span', { text: `${club.name} · ${DIVISION_NAMES[summary.division]} · age ${summary.age}` }),
-    ),
-    h('div', { class: 'cup-actions' }, button('Continue', onContinue, 'btn-primary')),
-  );
+        line,
+        meta,
+        actions,
+      );
   const royal = career.review?.royal ?? null;
   view.append(
     top,
@@ -1029,7 +1073,7 @@ export function seasonReviewView(career: CareerState, onContinue: () => void): H
     royal ? royalLine(royal) : '',
     agePanel(career, summary),
   );
-  if (say.proud) burstOver(view, ['#ffe39a', '#f2c14e', '#fff6d0', club.colour]);
+  if (say.honour) burstOver(view, ['#ffe39a', '#f2c14e', '#fff6d0', club.colour]);
   return view;
 }
 
@@ -1249,9 +1293,6 @@ export function recordsView(career: CareerState, onBack: () => void): HTMLElemen
 }
 
 // Royal ----------------------------------------------------------------------------------------------
-
-/** The royal tournament's rounds, as the core plays them. */
-const ROYAL_ROUNDS = 3;
 
 function royalKnight(career: CareerState, id: string): { name: string; club: string | null; you: boolean } {
   if (id === PLAYER_ID) return { name: career.player.look.name, club: career.player.club, you: true };
