@@ -4,8 +4,9 @@ import { sound } from '../../audio/sound';
 import { KNIGHT, MATCH, STEP } from '../../game/constants';
 import { knightById } from '../../game/match';
 import { randomSeed } from '../../game/rng';
-import type { Knight, MatchEvent, MatchState, Role, TeamId } from '../../game/types';
+import type { Input, Knight, MatchEvent, MatchState, Role, TeamId } from '../../game/types';
 import { Keyboard } from '../../input/keyboard';
+import { TouchControls, whenTouch } from '../../input/touch';
 import type { Tactics } from '../../ai/tactics';
 import type { Dugout, GoalRecord, MatchResult, MatchSession } from '../../modes/mode';
 import { MatchRunner } from '../../modes/runner';
@@ -33,6 +34,20 @@ const ROLE_ORDER: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
 /** Maps match time onto a football clock: a full match reads as 90 minutes. */
 const footballMinute = (elapsed: number, duration: number, golden: boolean): string =>
   golden ? '90+' : String(Math.max(1, Math.ceil((elapsed / duration) * 90)));
+
+const KEYBOARD_HINT =
+  'WASD / arrows run · Space kick (hold to kick on contact) · Shift or E barge · Esc pause · M mute';
+const TOUCH_HINT = 'Drag on the left to run · Hold KICK to kick on contact · Tap BARGE to barge';
+
+/** What the knight was asked to do, for the stage's `data-touch-input` (read by the smoke test). */
+const describeInput = (input: Input): string =>
+  [input.moveX || input.moveY ? 'run' : '', input.kick ? 'kick' : '', input.barge ? 'barge' : '']
+    .filter(Boolean)
+    .join(' ');
+
+/** Shown under the pitch in portrait only; play goes on either way. */
+const rotateHint = (): HTMLElement =>
+  h('p', { class: 'rotate-hint' }, icon('rotate'), 'Turn your phone for a bigger pitch');
 
 const formatClock = (seconds: number): string => {
   const s = Math.ceil(seconds);
@@ -114,52 +129,73 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       )
     : null;
 
-  root.append(
+  const hint = h('p', {
+    class: 'hint',
+    text: human ? KEYBOARD_HINT : '1 / 2 / 3 speed · Esc pause · M mute',
+  });
+  const stage = h(
+    'div',
+    { class: 'stage' },
+    canvas,
+    fx,
     h(
-      'section',
-      {
-        class: 'match',
-        attrs: { style: `--home: ${blockColour(homeHouse)}; --away: ${blockColour(awayHouse)}` },
-      },
+      'div',
+      { class: 'hud' },
+      h('div', { class: 'board' }, blocks[0], score, blocks[1], clock),
+      message,
+      ...(human ? [h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' }))] : []),
+      ...(watchControls ? [watchControls] : []),
+      mute,
       h(
-        'div',
-        { class: 'stage' },
-        canvas,
-        fx,
-        h(
-          'div',
-          { class: 'hud' },
-          h('div', { class: 'board' }, blocks[0], score, blocks[1], clock),
-          message,
-          ...(human ? [h('div', { class: 'barge' }, bargeRing, h('span', { text: 'BARGE' }))] : []),
-          ...(watchControls ? [watchControls] : []),
-          mute,
-          h(
-            'button',
-            {
-              class: 'icon-btn pause-btn',
-              attrs: { type: 'button', 'aria-label': 'Pause (Esc)', title: 'Pause (Esc)' },
-              on: {
-                click: (e) => {
-                  (e.currentTarget as HTMLButtonElement).blur();
-                  togglePause();
-                },
-              },
+        'button',
+        {
+          class: 'icon-btn pause-btn',
+          attrs: { type: 'button', 'aria-label': 'Pause (Esc)', title: 'Pause (Esc)' },
+          on: {
+            click: (e) => {
+              (e.currentTarget as HTMLButtonElement).blur();
+              togglePause();
             },
-            icon('pause'),
-          ),
-        ),
-        overlay,
-        dugoutNews,
+          },
+        },
+        icon('pause'),
       ),
-      h('p', {
-        class: 'hint',
-        text: human
-          ? 'WASD / arrows run · Space kick (hold to kick on contact) · Shift or E barge · Esc pause · M mute'
-          : '1 / 2 / 3 speed · Esc pause · M mute',
-      }),
     ),
+    overlay,
+    dugoutNews,
   );
+  const section = h(
+    'section',
+    {
+      class: 'match',
+      attrs: { style: `--home: ${blockColour(homeHouse)}; --away: ${blockColour(awayHouse)}` },
+    },
+    stage,
+    hint,
+  );
+  root.append(section);
+
+  // Only a knight needs a stick: watched matches keep their usual layout on any device.
+  const touch = human ? new TouchControls() : null;
+  const stopWatchingTouch = touch
+    ? whenTouch(() => {
+        section.classList.add('touch');
+        section.append(rotateHint(), touch.element);
+        hint.textContent = TOUCH_HINT;
+      })
+    : () => undefined;
+  let touchShown = '';
+  /** Touch while a finger is down, else the keyboard, so a tablet with a keyboard plays either way. */
+  const humanInput = (): Input => {
+    const fromTouch = touch?.active ? touch : null;
+    const input = fromTouch ? fromTouch.input() : keyboard.input();
+    const shown = fromTouch ? describeInput(input) : '';
+    if (shown !== touchShown) {
+      touchShown = shown;
+      stage.dataset.touchInput = shown;
+    }
+    return input;
+  };
 
   let messageUntil = 0;
   let lastPhase: MatchState['phase'] | null = null;
@@ -508,6 +544,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
   });
 
   function showOverlay(...children: HTMLElement[]): void {
+    touch?.release();
     overlay.replaceChildren(h('div', { class: 'overlay-card' }, ...children));
     overlay.hidden = false;
     overlay.querySelector('button')?.focus();
@@ -570,7 +607,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       accumulator += dt * (slow ? SLOW_MOTION.scale : speed);
       while (accumulator >= STEP && !runner.ended) {
         accumulator -= STEP;
-        runner.advanceOne((k) => (k.human ? keyboard.input() : null));
+        runner.advanceOne((k) => (k.human ? humanInput() : null));
         const events = state.events;
         state.events = [];
         for (const event of events) onEvent(event);
@@ -585,7 +622,8 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       effects.update(dt, state);
       score.textContent = `${state.score[0]} – ${state.score[1]}`;
       clock.textContent = state.goldenGoal ? 'GOLDEN' : formatClock(state.clock);
-      bargeRing.style.setProperty('--p', String(1 - (human?.bargeCooldown ?? 0) / KNIGHT.bargeCooldown));
+      // On the section, so the touch Barge button's ring reads it too.
+      section.style.setProperty('--p', String(1 - (human?.bargeCooldown ?? 0) / KNIGHT.bargeCooldown));
     }
     renderer.draw({
       state,
@@ -603,6 +641,8 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
     cancelAnimationFrame(frame);
     releaseDrag();
     keyboard.dispose();
+    stopWatchingTouch();
+    touch?.dispose();
     sound.stopMatch();
   };
 }
