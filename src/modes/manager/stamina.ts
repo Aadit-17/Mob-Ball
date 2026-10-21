@@ -236,8 +236,8 @@ const VALUE_SE = 0.06;
 
 /**
  * A sub must still help at SUB_MARGIN_SE standard errors below its fitted gain. scripts/rivals.sim.ts, 12 real
- * seasons: rivals sub in 67% of matches (61% within a goal at the hour, 88% with a fitted-better bench); v the
- * same side with no subs -0.00 ± 0.04 pts, -0.03 ± 0.05 goals a match; v no manager +0.01 ± 0.05, -0.01 ± 0.06.
+ * seasons: rivals sub in 52% of matches (40–50% within a goal at the hour, 76% with a fitted-better bench); v the
+ * same side with no subs -0.02 ± 0.03 pts, -0.03 ± 0.04 goals a match; v no manager +0.02 ± 0.04, +0.01 ± 0.05.
  */
 export const SUB_MARGIN_SE = 1;
 /** Goals a side a match in rival league play (1.74 ± 0.07 measured), for the points a goal is worth. */
@@ -303,7 +303,7 @@ function subValue(off: OnPitch, on: BenchOption, left: number, lead: number, wei
 }
 
 /** The keeper only comes off to rest: tactical subs for him measured -0.31 ± 0.28 goals (rivals.sim, n 49),
- * as the starter the outfield misses least is in goal already. */
+ * as the starter the outfield misses least is in goal already; resting subs only, -0.03 ± 0.18 (n 136). */
 const mayComeOff = (knight: OnPitch): boolean => knight.role !== 'gk' || knight.stamina < FRESH;
 
 /** A rival's touchline: one substitution when it helps, then tactics late on. At most one action a poll. */
