@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "balance": "vitest run --config scripts/vitest.config.ts --reporter=verbose -t 'balance report'",
     "tactics": "vitest run --config scripts/vitest.config.ts --reporter=verbose -t 'tactics report'",
+    "stats": "vitest run --config scripts/vitest.config.ts --reporter=verbose -t 'stats report'",
     "smoke": "vite build && tsx scripts/smoke.ts",
     "og-image": "tsx scripts/og-image.ts"
   },
