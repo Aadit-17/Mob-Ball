@@ -367,6 +367,9 @@ describe('signs, on real matches', () => {
   });
 });
 
+const completedAt = (stats: MatchStats, id: number, step: number): boolean =>
+  stats.actions.some((a) => a.kind === 'pass' && a.knightId === id && a.step === step && a.completed);
+
 /** Steps in each role, as a stats line has them. */
 const steps = (roles: Partial<Record<Role, number>>) => ({ gk: 0, def: 0, mid: 0, fwd: 0, ...roles });
 
@@ -598,6 +601,50 @@ describe('the rating breakdown', () => {
       }
   });
 
+  it('keeps a save worth clearly less than a goal: no Saves line averages over +0.7 a save', () => {
+    let saves = 0;
+    for (const stats of REAL)
+      for (const k of stats.knights) {
+        const line = ratingBreakdown(stats, k.id)?.lines.find((l) => l.label === 'Saves');
+        if (!line || k.saves + k.claims === 0) continue;
+        expect(line.points / (k.saves + k.claims)).toBeLessThan(0.7);
+        saves++;
+      }
+    expect(saves).toBeGreaterThanOrEqual(3);
+  });
+
+  it('labels passes by what earned the points: completed ones counted, lost ones with losing the ball', () => {
+    for (const stats of REAL) {
+      const actions = valueActions(stats);
+      for (const k of stats.knights) {
+        const b = ratingBreakdown(stats, k.id, RATING_MODEL, actions);
+        if (!b) continue;
+        const passes = b.lines.find((l) => l.label === 'Passes');
+        const chance = b.lines.find((l) => l.label === 'Chance created');
+        const shown = Number(passes?.count.slice(1) ?? 0) + (chance ? 1 : 0);
+        // A pass that set up a goal shows as the assist instead.
+        const assists = actions.filter((a) => a.knightId === k.id && a.kind === 'assist').length;
+        if (passes || chance) expect(shown + assists).toBe(k.passesCompleted);
+        const lost = actions.filter(
+          (a) => a.knightId === k.id && a.kind === 'pass' && !completedAt(stats, k.id, a.step),
+        );
+        if (lost.length) expect(b.lines.some((l) => l.label === 'Lost the ball')).toBe(true);
+      }
+    }
+  });
+
+  it('breaks out a chance created when one pass carries most of the passing', () => {
+    let found = 0;
+    for (const stats of REAL)
+      for (const k of stats.knights) {
+        const chance = ratingBreakdown(stats, k.id)?.lines.find((l) => l.label === 'Chance created');
+        if (!chance) continue;
+        found++;
+        expect(chance.points).toBeGreaterThanOrEqual(0.2);
+      }
+    expect(found).toBeGreaterThan(0);
+  });
+
   it("names a goal's credit under Goals and a clean sheet under its own line", () => {
     const stats = REAL.find((st) => st.knights.some((k) => k.goals > 0));
     const scorer = stats?.knights.find((k) => k.goals > 0);
@@ -697,11 +744,11 @@ const golden = (stats: MatchStats): string => {
 };
 
 const GOLDEN: Readonly<Record<number, string>> = {
-  1: '2-0 | 0gk:7.26 1def:8.55 2mid:7.28 3fwd:6.38 4gk:7.78 5def:6.32 6mid:6.46 7fwd:6.66 | motm 1',
-  3: '3-4 | 0gk:6.78 1def:7.92 2mid:5.80 3fwd:8.30 4gk:7.33 5def:7.12 6mid:8.13 7fwd:8.51 | motm 7',
-  5: '3-2 | 0gk:7.37 1def:6.25 2mid:8.66 3fwd:7.48 4gk:8.26 5def:6.44 6mid:7.12 7fwd:7.32 | motm 2',
-  7: '1-3 | 0gk:5.70 1def:6.04 2mid:7.30 3fwd:7.45 4gk:6.48 5def:7.06 6mid:7.17 7fwd:7.83 | motm 7',
-  9: '0-3 | 0gk:5.89 1def:6.14 2mid:6.46 3fwd:6.54 4gk:7.07 5def:6.51 6mid:8.70 7fwd:7.41 | motm 6',
+  1: '2-0 | 0gk:7.46 1def:8.55 2mid:7.28 3fwd:6.38 4gk:6.85 5def:6.32 6mid:6.46 7fwd:6.66 | motm 1',
+  3: '3-4 | 0gk:6.50 1def:7.92 2mid:5.80 3fwd:8.30 4gk:7.05 5def:7.12 6mid:8.13 7fwd:8.51 | motm 7',
+  5: '3-2 | 0gk:7.09 1def:6.25 2mid:8.66 3fwd:7.48 4gk:7.33 5def:6.44 6mid:7.12 7fwd:7.32 | motm 2',
+  7: '1-3 | 0gk:6.07 1def:6.04 2mid:7.30 3fwd:7.45 4gk:6.84 5def:7.06 6mid:7.17 7fwd:7.83 | motm 7',
+  9: '0-3 | 0gk:6.26 1def:6.14 2mid:6.46 3fwd:6.54 4gk:7.26 5def:6.51 6mid:8.70 7fwd:7.41 | motm 6',
 };
 
 describe('golden matches', () => {

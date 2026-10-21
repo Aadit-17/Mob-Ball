@@ -90,7 +90,8 @@ export const RATING_MODEL: RatingModel = {
   },
   lift: 0.6,
   spread: 0.5875,
-  outcome: { goal: 0.2696, assist: 0.1348, ownGoal: 0.2696, save: 0.6713, cleanSheet: 0.1653 },
+  outcome: { goal: 0.2696, assist: 0.1348, ownGoal: 0.2696, save: 0.0261, cleanSheet: 0 },
   motmMargin: 0.5,
   possession: { shot: [0.3147, 0.3197, 0.1788, 0.0622, 0.0438, 0.0403], weight: 0.1984 },
+  keeperLift: 0.3635,
 };

@@ -68,6 +68,9 @@ export interface RatingModel {
   /** A losing side's knight is man of the match only if he out-rates the winners' best by this much. */
   readonly motmMargin: number;
   readonly possession: PossessionModel;
+  /** Added to a keeper's base for his time in goal: outfielders score, assist and win the ball on top of
+   * their process value, keepers can't, so this keeps the positions' means level (fitted). */
+  readonly keeperLift: number;
 }
 
 // Winning the ball is worth more than the next few seconds' goal chance shows: it gives your side the ball.
@@ -396,6 +399,7 @@ export const scoreOf = (
 ): number =>
   BASE +
   model.lift +
+  model.keeperLift * Math.min(1, roleSteps.gk / REGULATION_STEPS) +
   model.spread * standardise(value, roleSteps, model.roles) +
   outcomeCredit(o, roleSteps, model);
 
@@ -472,6 +476,7 @@ type Group =
   | 'assists'
   | 'shots'
   | 'passes'
+  | 'chance'
   | 'carries'
   | 'won'
   | 'saves'
@@ -507,6 +512,7 @@ const GROUP_LABEL: Readonly<Record<Group, string>> = {
   assists: 'Assists',
   shots: 'Shots',
   passes: 'Passes',
+  chance: 'Chance created',
   carries: 'On the ball',
   won: 'Won the ball',
   saves: 'Saves',
@@ -536,7 +542,33 @@ export function ratingBreakdown(
   const add = (g: Group, p: number): void => {
     points.set(g, (points.get(g) ?? 0) + p);
   };
-  for (const a of actions) if (a.knightId === knightId) add(GROUP_OF[a.kind], unit * a.value);
+  // A pass is counted where it ended: completed ones under Passes (the best of them its own line when it
+  // carries most of their worth), lost ones with the rest of losing the ball.
+  const completed = new Set(
+    stats.actions.flatMap((a) =>
+      a.kind === 'pass' && a.completed && a.knightId === knightId ? [a.step] : [],
+    ),
+  );
+  const mine = actions.filter((a) => a.knightId === knightId);
+  const passes = mine.filter((a) => a.kind === 'pass' && completed.has(a.step));
+  const key = passes.reduce<ValuedAction | null>(
+    (best, a) => (best && best.value >= a.value ? best : a),
+    null,
+  );
+  const keyPoints = key ? unit * key.value : 0;
+  const chance =
+    key !== null && keyPoints >= KEY_PASS && keyPoints >= (unit * totalValue(passes, knightId)) / 2;
+  for (const a of mine) {
+    const group =
+      a.kind === 'pass'
+        ? completed.has(a.step)
+          ? chance && a === key
+            ? 'chance'
+            : 'passes'
+          : 'lost'
+        : GROUP_OF[a.kind];
+    add(group, unit * a.value);
+  }
   if (o.goals) add('goals', w.goal * o.goals);
   if (o.assists) add('assists', w.assist * o.assists);
   if (o.ownGoals) add('ownGoals', -w.ownGoal * o.ownGoals);
@@ -553,7 +585,8 @@ export function ratingBreakdown(
     goals: `×${k.goals}`,
     assists: `×${k.assists}`,
     shots: `×${k.shots}`,
-    passes: `${k.passesCompleted}/${k.passes}`,
+    passes: `×${passes.length - (chance ? 1 : 0)}`,
+    chance: '',
     carries: '',
     won: `×${k.tackles + k.interceptions + k.recoveries}`,
     saves: `×${k.saves + k.claims}`,
@@ -572,6 +605,9 @@ export function ratingBreakdown(
   const base = score - lines.reduce((sum, l) => sum + l.points, 0);
   return { base, lines, score, rating: toRating(score) };
 }
+
+/** A single completed pass worth this many rating points, and most of his passing, is a chance created. */
+const KEY_PASS = 0.2;
 
 const totalValue = (actions: readonly ValuedAction[], id: number): number =>
   actions.reduce((sum, a) => (a.knightId === id ? sum + a.value : sum), 0);
