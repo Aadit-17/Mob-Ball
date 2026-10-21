@@ -20,6 +20,7 @@ import {
   playerStars,
   PLAYER_ID,
   POSITIONS,
+  ROYAL_RIVAL_TIERS,
   simMatchday,
   simulate,
   startCareer,
@@ -37,6 +38,8 @@ const RUNS = Number(process.env.CAREER_RUNS ?? Math.max(1, availableParallelism(
 /** Age 17 to 38: the whole climb, the peak and the decline. */
 const SEASONS = Number(process.env.CAREER_SEASONS ?? 22);
 const FIRST_SEED = 9000;
+/** Its own limit, not the scripts' ten minutes: a career run takes about eight on a quiet machine, more on a busy one. */
+const CAREER_TIMEOUT = 45 * 60_000;
 
 interface SeasonRow {
   readonly season: number;
@@ -52,6 +55,9 @@ interface SeasonRow {
   readonly matchPoints: number;
   readonly honourPoints: number;
   readonly honours: readonly Honour[];
+  /** Royal knockout rounds played and won, 0 without a call-up. */
+  readonly royalPlayed: number;
+  readonly royalWon: number;
   readonly offers: number;
   readonly offerUp: number;
   readonly moved: boolean;
@@ -237,6 +243,8 @@ function runCareer(seed: number, position: (typeof POSITIONS)[number]): CareerRu
       matchPoints: summary.matchPoints,
       honourPoints: summary.honourPoints,
       honours: summary.honours,
+      royalPlayed: review.royal?.matches.length ?? 0,
+      royalWon: review.royal?.matches.filter((m) => m.score[0] > m.score[1]).length ?? 0,
       offers: review.offers.length,
       offerUp: review.offers.filter((o) => o.division > summary.division).length,
       moved: better !== undefined,
@@ -317,6 +325,7 @@ const median = (xs: readonly number[]): number => {
 };
 const f1 = (x: number): string => (Number.isFinite(x) ? x.toFixed(1) : '–');
 const f2 = (x: number): string => (Number.isFinite(x) ? x.toFixed(2) : '–');
+const rate2 = (n: number, d: number): number => (d ? n / d : NaN);
 const pct = (x: number): string => `${Math.round(x * 100)}%`;
 
 /** Least squares with standard errors, by the normal equations (a handful of columns). */
@@ -354,7 +363,7 @@ function ols(
 // ------------------------------------------------------------------ report
 
 /** Bounds the run fails outside, from the plan: near-maxed in the late twenties, the Great Houses in 4–8 seasons. */
-/** A lean of ratings on stars or teammates (rating points a tier) small enough to treat par as one number. */
+/** A lean of ratings on teammates (rating points a tier) small enough to leave out of the form model. */
 const LEAN = 0.15;
 
 const TARGETS = {
@@ -377,198 +386,240 @@ const TARGETS = {
 } as const;
 
 if (!isCareerWorker)
-  it('career report', async () => {
-    const tasks = Array.from({ length: RUNS }, (_, i) => ({
-      seed: FIRST_SEED + i,
-      position: POSITIONS[i % POSITIONS.length] ?? 'fwd',
-    }));
-    const started = performance.now();
-    const runs = await runAll(tasks);
-    const lines: string[] = [
-      `${runs.length} careers × ${SEASONS} seasons (${f1((performance.now() - started) / 1000)} s), simmed throughout; positions cycle gk, def, mid, fwd.`,
-      '',
-      'season age | Vil Shi Grt | apps start on  off avg  pts  bonus | stars levels trained | offers up moved | up down title royal | fame',
-    ];
-    const failures: string[] = runs.flatMap((r) => r.problems);
+  it(
+    'career report',
+    async () => {
+      const tasks = Array.from({ length: RUNS }, (_, i) => ({
+        seed: FIRST_SEED + i,
+        position: POSITIONS[i % POSITIONS.length] ?? 'fwd',
+      }));
+      const started = performance.now();
+      const runs = await runAll(tasks);
+      const lines: string[] = [
+        `${runs.length} careers × ${SEASONS} seasons (${f1((performance.now() - started) / 1000)} s), simmed throughout; positions cycle gk, def, mid, fwd.`,
+        '',
+        'season age | Vil Shi Grt | apps start on  off avg  pts  bonus | stars levels trained | offers up moved | up down title royal | fame',
+      ];
+      const failures: string[] = runs.flatMap((r) => r.problems);
 
-    for (let s = 0; s < SEASONS; s++) {
-      const rows = runs.map((r) => r.seasons[s]).filter((x): x is SeasonRow => x !== undefined);
-      if (!rows.length) continue;
-      const share = (f: (r: SeasonRow) => boolean) => pct(rows.filter(f).length / rows.length).padStart(4);
-      const averages = rows.map((r) => r.average).filter((a): a is number => a !== null);
-      lines.push(
-        [
-          `${String(s + 1).padStart(6)} ${String(rows[0]?.age ?? 0).padStart(3)}`,
-          DIVISIONS.map((d) => share((r) => r.division === d)).join(''),
-          `${f1(mean(rows.map((r) => r.apps))).padStart(4)} ${f1(mean(rows.map((r) => r.starts))).padStart(5)} ${f1(mean(rows.map((r) => r.subOns))).padStart(3)} ${f1(mean(rows.map((r) => r.subOffs))).padStart(4)} ${f2(mean(averages))} ${f1(mean(rows.map((r) => r.matchPoints))).padStart(4)} ${f1(mean(rows.map((r) => r.honourPoints))).padStart(5)}`,
-          `${f2(mean(rows.map((r) => r.stars))).padStart(5)} ${f1(mean(rows.map((r) => r.levels))).padStart(6)} ${share((r) => r.trained >= 0.9).padStart(7)}`,
-          `${f1(mean(rows.map((r) => r.offers))).padStart(6)} ${f1(mean(rows.map((r) => r.offerUp))).padStart(3)} ${share((r) => r.moved).padStart(5)}`,
-          `${share((r) => r.clubUp)} ${share((r) => r.clubDown)} ${share((r) => r.honours.includes('title'))} ${share((r) => r.honours.includes('royalCall'))}`,
-          f1(mean(rows.map((r) => r.fame))),
-        ].join(' | '),
-      );
-    }
-
-    // The economy: when each career had spent 90% of what maxing out costs.
-    const maxedAges = runs.map((r) => r.seasons.find((x) => x.trained >= 0.9)?.age ?? Infinity);
-    const greatSeasons = runs.map((r) => (r.seasons.find((x) => x.division === 2)?.season ?? Infinity) + 1);
-    const early =
-      runs.filter((r) => r.seasons.slice(0, 3).some((x) => x.division === 2)).length / runs.length;
-    const peak = runs.map((r) => Math.max(...r.seasons.map((x) => x.stars)));
-    const at34 = runs.map((r) => r.seasons.find((x) => x.age === 34)?.stars ?? NaN);
-    const fade = at34.map((s, i) => (peak[i] ?? 0) - s);
-    lines.push(
-      '',
-      `economy: 90% of the ${maxedCost} points to max out spent at age ${f1(median(maxedAges))} (median; ${maxedAges.map((a) => (Number.isFinite(a) ? a : '–')).join(' ')})`,
-      `climb: first Great Houses season ${f1(median(greatSeasons))} (median; ${greatSeasons.map((a) => (Number.isFinite(a) ? a : '–')).join(' ')}); there by the third season in ${pct(early)}`,
-      `ageing: peak stars ${f2(median(peak))}, at 34 ${f2(median(at34))} (fade ${f2(median(fade))})`,
-    );
-    const inside = (x: number, [lo, hi]: readonly [number, number]) => x >= lo && x <= hi;
-    if (!inside(median(maxedAges), TARGETS.maxedAge)) failures.push(`near-maxed at ${f1(median(maxedAges))}`);
-    if (!inside(median(greatSeasons), TARGETS.greatHousesSeason))
-      failures.push(`Great Houses in season ${f1(median(greatSeasons))}`);
-    // Past the bar by more than the sample's standard error: eleven careers measure a share to about ±15%.
-    const shareSe = Math.sqrt((TARGETS.earlyGreatHouses * (1 - TARGETS.earlyGreatHouses)) / runs.length);
-    if (early - shareSe > TARGETS.earlyGreatHouses)
-      failures.push(`${pct(early)} in the Great Houses by season 3`);
-    if (SEASONS >= 18) {
-      if (!inside(median(fade), TARGETS.fadeAt34)) failures.push(`stars fade by ${f2(median(fade))} at 34`);
-      if (!(median(at34) >= TARGETS.starsAt34)) failures.push(`stars at 34 ${f2(median(at34))}`);
-    }
-
-    // Playing time: how often he plays (starts or comes on), overall, by division and by form, and the hook.
-    const plays = runs.flatMap((r) => r.plays);
-    const played = (p: PlayRow) => p.started || p.cameOn;
-    const rate = (rows: readonly PlayRow[], f: (p: PlayRow) => boolean) =>
-      rows.length ? rows.filter(f).length / rows.length : NaN;
-    const line = (name: string, rows: readonly PlayRow[]) =>
-      `  ${name.padEnd(26)} ${String(rows.length).padStart(5)} matches: plays ${pct(rate(rows, played)).padStart(4)}, starts ${pct(rate(rows, (p) => p.started)).padStart(4)}, on from the bench ${pct(rate(rows, (p) => p.cameOn)).padStart(3)} (of benched ${pct(
-        rate(
-          rows.filter((p) => !p.started),
-          (p) => p.cameOn,
-        ),
-      )}), off ${pct(rate(rows, (p) => p.subbedOff))}`;
-    const formBins = [
-      ['form below -0.4 tiers', (f: number) => f < -0.4],
-      ['form -0.4 to -0.15', (f: number) => f >= -0.4 && f < -0.15],
-      ['form -0.15 to +0.15', (f: number) => f >= -0.15 && f <= 0.15],
-      ['form above +0.15', (f: number) => f > 0.15],
-    ] as const;
-    // Careers by their mean form reading: the worst quarter is "poor form" in the round.
-    const careerForm = runs
-      .map((r) => ({ r, form: mean(r.plays.map((p) => p.form)) }))
-      .sort((a, b) => a.form - b.form);
-    const quarter = Math.max(1, Math.round(careerForm.length / 4));
-    const worst = careerForm.slice(0, quarter).flatMap((x) => x.r.plays);
-    const best = careerForm.slice(-quarter).flatMap((x) => x.r.plays);
-    const poor = plays.filter((p) => p.form < -0.15);
-    const good = plays.filter((p) => p.form > 0.15);
-    lines.push(
-      '',
-      'playing time (every match of his club):',
-      line('all', plays),
-      ...DIVISIONS.map((d) =>
-        line(
-          `division ${d}`,
-          plays.filter((p) => p.division === d),
-        ),
-      ),
-      ...formBins.map(([name, f]) =>
-        line(
-          name,
-          plays.filter((p) => f(p.form)),
-        ),
-      ),
-      line(`worst-form quarter of careers`, worst),
-      line(`best-form quarter of careers`, best),
-    );
-    const live = plays.map((p) => p.judged).filter((x): x is number => x !== null);
-    const sd = Math.sqrt(mean(live.map((x) => (x - mean(live)) ** 2)));
-    const hooked = plays.filter((p) => p.subbedOff);
-    lines.push(
-      `  live rating at the hour (${live.length} starts): mean ${f2(mean(live))}, sd ${f2(sd)}; under ${HOOK_RATING} ${pct(
-        rate(
-          plays.filter((p) => p.judged !== null),
-          (p) => (p.judged ?? 10) < HOOK_RATING,
-        ),
-      )}, ` +
-        `under 5.5 ${pct(live.filter((x) => x < 5.5).length / live.length)}, under 4.5 ${pct(live.filter((x) => x < 4.5).length / live.length)}; hooked knights' final rating ${f2(mean(hooked.map((p) => p.rating ?? NaN)))}`,
-    );
-    if (!(rate(poor, played) >= TARGETS.poorFormPlays))
-      failures.push(`plays ${pct(rate(poor, played))} of matches in poor form`);
-    if (!(rate(worst, played) >= TARGETS.poorFormPlays))
-      failures.push(`plays ${pct(rate(worst, played))} of matches in the worst-form careers`);
-    if (!(rate(good, (p) => p.started) >= TARGETS.goodFormStarts))
-      failures.push(`starts ${pct(rate(good, (p) => p.started))} of matches in good form`);
-    if (!(rate(plays, (p) => p.started) <= TARGETS.startsAtMost))
-      failures.push(`starts ${pct(rate(plays, (p) => p.started))} of all matches: selection no longer bites`);
-    if (!(rate(plays, (p) => p.subbedOff) <= TARGETS.hookedAtMost))
-      failures.push(`taken off in ${pct(rate(plays, (p) => p.subbedOff))} of matches`);
-
-    // The world: each division's strength stays near its tier, in order, season after season.
-    lines.push('', 'world: mean club level by division (best four), every fourth season');
-    for (let s = 0; s < SEASONS; s++) {
-      const levels = DIVISIONS.map((d) => runs.map((r) => r.world[s]?.levels[d] ?? NaN));
-      const means = levels.map(mean);
-      if (s % 4 === 0 || s === SEASONS - 1)
+      for (let s = 0; s < SEASONS; s++) {
+        const rows = runs.map((r) => r.seasons[s]).filter((x): x is SeasonRow => x !== undefined);
+        if (!rows.length) continue;
+        const share = (f: (r: SeasonRow) => boolean) => pct(rows.filter(f).length / rows.length).padStart(4);
+        const averages = rows.map((r) => r.average).filter((a): a is number => a !== null);
         lines.push(
-          `  season ${String(s + 1).padStart(2)}: ${DIVISIONS.map((d) => `${f2(means[d] ?? NaN)} [${f2(Math.min(...(levels[d] ?? [])))}–${f2(Math.max(...(levels[d] ?? [])))}]`).join('  ')}`,
+          [
+            `${String(s + 1).padStart(6)} ${String(rows[0]?.age ?? 0).padStart(3)}`,
+            DIVISIONS.map((d) => share((r) => r.division === d)).join(''),
+            `${f1(mean(rows.map((r) => r.apps))).padStart(4)} ${f1(mean(rows.map((r) => r.starts))).padStart(5)} ${f1(mean(rows.map((r) => r.subOns))).padStart(3)} ${f1(mean(rows.map((r) => r.subOffs))).padStart(4)} ${f2(mean(averages))} ${f1(mean(rows.map((r) => r.matchPoints))).padStart(4)} ${f1(mean(rows.map((r) => r.honourPoints))).padStart(5)}`,
+            `${f2(mean(rows.map((r) => r.stars))).padStart(5)} ${f1(mean(rows.map((r) => r.levels))).padStart(6)} ${share((r) => r.trained >= 0.9).padStart(7)}`,
+            `${f1(mean(rows.map((r) => r.offers))).padStart(6)} ${f1(mean(rows.map((r) => r.offerUp))).padStart(3)} ${share((r) => r.moved).padStart(5)}`,
+            `${share((r) => r.clubUp)} ${share((r) => r.clubDown)} ${share((r) => r.honours.includes('title'))} ${share((r) => r.honours.includes('royalCall'))}`,
+            f1(mean(rows.map((r) => r.fame))),
+          ].join(' | '),
         );
-      for (const d of DIVISIONS)
-        for (const level of levels[d] ?? [])
-          if (Math.abs(level - DIVISION_TIER[d] - 0.4) > TARGETS.levelBand)
-            failures.push(`season ${s + 1}: division ${d} at level ${f2(level)}`);
-    }
+      }
 
-    // The form model, refitted on these careers' matches against the frozen fit.
-    const fit = (keeper: boolean) => {
-      const rows = runs.flatMap((r) => r.matches).filter((m) => m.keeper === keeper);
-      return {
-        n: rows.length,
-        ...ols(
-          rows.map((m) => (keeper ? [1, m.mates] : [1, m.gap, m.mates])),
-          rows.map((m) => m.rating),
+      // The economy: when each career had spent 90% of what maxing out costs.
+      const maxedAges = runs.map((r) => r.seasons.find((x) => x.trained >= 0.9)?.age ?? Infinity);
+      const greatSeasons = runs.map((r) => (r.seasons.find((x) => x.division === 2)?.season ?? Infinity) + 1);
+      const early =
+        runs.filter((r) => r.seasons.slice(0, 3).some((x) => x.division === 2)).length / runs.length;
+      const peak = runs.map((r) => Math.max(...r.seasons.map((x) => x.stars)));
+      const at34 = runs.map((r) => r.seasons.find((x) => x.age === 34)?.stars ?? NaN);
+      const fade = at34.map((s, i) => (peak[i] ?? 0) - s);
+      lines.push(
+        '',
+        `economy: 90% of the ${maxedCost} points to max out spent at age ${f1(median(maxedAges))} (median; ${maxedAges.map((a) => (Number.isFinite(a) ? a : '–')).join(' ')})`,
+        `climb: first Great Houses season ${f1(median(greatSeasons))} (median; ${greatSeasons.map((a) => (Number.isFinite(a) ? a : '–')).join(' ')}); there by the third season in ${pct(early)}`,
+        `ageing: peak stars ${f2(median(peak))}, at 34 ${f2(median(at34))} (fade ${f2(median(fade))})`,
+      );
+      const inside = (x: number, [lo, hi]: readonly [number, number]) => x >= lo && x <= hi;
+      if (!inside(median(maxedAges), TARGETS.maxedAge))
+        failures.push(`near-maxed at ${f1(median(maxedAges))}`);
+      if (!inside(median(greatSeasons), TARGETS.greatHousesSeason))
+        failures.push(`Great Houses in season ${f1(median(greatSeasons))}`);
+      // Past the bar by more than the sample's standard error: eleven careers measure a share to about ±15%.
+      const shareSe = Math.sqrt((TARGETS.earlyGreatHouses * (1 - TARGETS.earlyGreatHouses)) / runs.length);
+      if (early - shareSe > TARGETS.earlyGreatHouses)
+        failures.push(`${pct(early)} in the Great Houses by season 3`);
+      if (SEASONS >= 18) {
+        if (!inside(median(fade), TARGETS.fadeAt34)) failures.push(`stars fade by ${f2(median(fade))} at 34`);
+        if (!(median(at34) >= TARGETS.starsAt34)) failures.push(`stars at 34 ${f2(median(at34))}`);
+      }
+
+      // Playing time: how often he plays (starts or comes on), overall, by division and by form, and the hook.
+      const plays = runs.flatMap((r) => r.plays);
+      const played = (p: PlayRow) => p.started || p.cameOn;
+      const rate = (rows: readonly PlayRow[], f: (p: PlayRow) => boolean) =>
+        rows.length ? rows.filter(f).length / rows.length : NaN;
+      const line = (name: string, rows: readonly PlayRow[]) =>
+        `  ${name.padEnd(26)} ${String(rows.length).padStart(5)} matches: plays ${pct(rate(rows, played)).padStart(4)}, starts ${pct(rate(rows, (p) => p.started)).padStart(4)}, on from the bench ${pct(rate(rows, (p) => p.cameOn)).padStart(3)} (of benched ${pct(
+          rate(
+            rows.filter((p) => !p.started),
+            (p) => p.cameOn,
+          ),
+        )}), off ${pct(rate(rows, (p) => p.subbedOff))}`;
+      const formBins = [
+        ['form below -0.4 tiers', (f: number) => f < -0.4],
+        ['form -0.4 to -0.15', (f: number) => f >= -0.4 && f < -0.15],
+        ['form -0.15 to +0.15', (f: number) => f >= -0.15 && f <= 0.15],
+        ['form above +0.15', (f: number) => f > 0.15],
+      ] as const;
+      // Careers by their mean form reading: the worst quarter is "poor form" in the round.
+      const careerForm = runs
+        .map((r) => ({ r, form: mean(r.plays.map((p) => p.form)) }))
+        .sort((a, b) => a.form - b.form);
+      const quarter = Math.max(1, Math.round(careerForm.length / 4));
+      const worst = careerForm.slice(0, quarter).flatMap((x) => x.r.plays);
+      const best = careerForm.slice(-quarter).flatMap((x) => x.r.plays);
+      const poor = plays.filter((p) => p.form < -0.15);
+      const good = plays.filter((p) => p.form > 0.15);
+      lines.push(
+        '',
+        'playing time (every match of his club):',
+        line('all', plays),
+        ...DIVISIONS.map((d) =>
+          line(
+            `division ${d}`,
+            plays.filter((p) => p.division === d),
+          ),
         ),
-      };
-    };
-    const out = fit(false);
-    const gk = fit(true);
-    const frozen = RATING_FIT;
-    const ci = (f: typeof out, i: number) => `${f2(f.b[i] ?? NaN)} ± ${f2(2 * (f.se[i] ?? 0))}`;
-    lines.push(
-      '',
-      `form fit, outfield (${out.n} matches): par ${ci(out, 0)}, a tier of stars over the rivals ${ci(out, 1)}, ` +
-        `a tier of teammates ${ci(out, 2)}, sd ${f2(out.sd)} (frozen par ${frozen.outfield.par}, sd ${frozen.outfield.sd})`,
-      `form fit, keeper (${gk.n} matches): par ${ci(gk, 0)}, a tier of teammates ${ci(gk, 1)}, sd ${f2(gk.sd)} ` +
-        `(frozen par ${frozen.gk.par}, sd ${frozen.gk.sd})`,
-    );
-    const near = (name: string, value: number, fitted: number | undefined, se: number | undefined) => {
-      if (fitted === undefined || se === undefined || Math.abs(value - fitted) > 2 * se + 0.02)
+        ...formBins.map(([name, f]) =>
+          line(
+            name,
+            plays.filter((p) => f(p.form)),
+          ),
+        ),
+        line(`worst-form quarter of careers`, worst),
+        line(`best-form quarter of careers`, best),
+      );
+      const live = plays.map((p) => p.judged).filter((x): x is number => x !== null);
+      const sd = Math.sqrt(mean(live.map((x) => (x - mean(live)) ** 2)));
+      const hooked = plays.filter((p) => p.subbedOff);
+      lines.push(
+        `  live rating at the hour (${live.length} starts): mean ${f2(mean(live))}, sd ${f2(sd)}; hook (under ${HOOK_RATING}) ${pct(
+          rate(
+            plays.filter((p) => p.judged !== null),
+            (p) => (p.judged ?? 10) < HOOK_RATING,
+          ),
+        )}, ` +
+          `under 5 ${pct(live.filter((x) => x < 5).length / live.length)}, under 6 ${pct(live.filter((x) => x < 6).length / live.length)}; hooked knights' final rating ${f2(mean(hooked.map((p) => p.rating ?? NaN)))}`,
+      );
+      if (!(rate(poor, played) >= TARGETS.poorFormPlays))
+        failures.push(`plays ${pct(rate(poor, played))} of matches in poor form`);
+      if (!(rate(worst, played) >= TARGETS.poorFormPlays))
+        failures.push(`plays ${pct(rate(worst, played))} of matches in the worst-form careers`);
+      if (!(rate(good, (p) => p.started) >= TARGETS.goodFormStarts))
+        failures.push(`starts ${pct(rate(good, (p) => p.started))} of matches in good form`);
+      if (!(rate(plays, (p) => p.started) <= TARGETS.startsAtMost))
         failures.push(
-          `form fit ${name}: frozen ${value}, fitted ${f2(fitted ?? NaN)} ± ${f2(2 * (se ?? 0))}`,
+          `starts ${pct(rate(plays, (p) => p.started))} of all matches: selection no longer bites`,
         );
-    };
-    // Par is one number only while no lean on stars or side is clearly there: at most LEAN beyond 2 SE.
-    const flat = (name: string, fitted: number | undefined, se: number | undefined) => {
-      if (fitted === undefined || se === undefined || Math.abs(fitted) - 2 * se > LEAN)
-        failures.push(`ratings lean on ${name}: ${f2(fitted ?? NaN)} ± ${f2(2 * (se ?? 0))}`);
-    };
-    for (const [f, fit, role] of [
-      [out, frozen.outfield, 'outfield'],
-      [gk, frozen.gk, 'keeper'],
-    ] as const) {
-      if (f.n < 100) continue;
-      near(`${role} par`, fit.par, f.b[0], f.se[0]);
-      if (Math.abs(f.sd - fit.sd) > 0.1) failures.push(`${role} rating sd ${f2(f.sd)}, frozen ${fit.sd}`);
-      f.b.slice(1).forEach((b, i) => {
-        flat(`${role} term ${i + 1}`, b, f.se[i + 1]);
-      });
-    }
+      if (!(rate(plays, (p) => p.subbedOff) <= TARGETS.hookedAtMost))
+        failures.push(`taken off in ${pct(rate(plays, (p) => p.subbedOff))} of matches`);
 
-    lines.push(
-      '',
-      failures.length ? `FAILED:\n  ${[...new Set(failures)].join('\n  ')}` : 'All checks passed.',
-    );
-    console.log(lines.join('\n'));
-    expect(failures).toEqual([]);
-  });
+      // The world: each division's strength stays near its tier, in order, season after season.
+      lines.push('', 'world: mean club level by division (best four), every fourth season');
+      for (let s = 0; s < SEASONS; s++) {
+        const levels = DIVISIONS.map((d) => runs.map((r) => r.world[s]?.levels[d] ?? NaN));
+        const means = levels.map(mean);
+        if (s % 4 === 0 || s === SEASONS - 1)
+          lines.push(
+            `  season ${String(s + 1).padStart(2)}: ${DIVISIONS.map((d) => `${f2(means[d] ?? NaN)} [${f2(Math.min(...(levels[d] ?? [])))}–${f2(Math.max(...(levels[d] ?? [])))}]`).join('  ')}`,
+          );
+        for (const d of DIVISIONS)
+          for (const level of levels[d] ?? [])
+            if (Math.abs(level - DIVISION_TIER[d] - 0.4) > TARGETS.levelBand)
+              failures.push(`season ${s + 1}: division ${d} at level ${f2(level)}`);
+      }
+
+      // The royal call and knockout: how often a career is called, and how far the royal four go.
+      const seasonsAll = runs.flatMap((r) => r.seasons);
+      const called = seasonsAll.filter((x) => x.royalPlayed > 0);
+      const roundRates = ROYAL_RIVAL_TIERS.map((_, i) => {
+        const reached = called.filter((x) => x.royalPlayed > i);
+        return `round ${i + 1} ${reached.filter((x) => x.royalWon > i).length}/${reached.length}`;
+      });
+      const crowned = runs.filter((r) => r.seasons.some((x) => x.honours.includes('royalCrown'))).length;
+      lines.push(
+        '',
+        `royal: called in ${called.length} of ${seasonsAll.length} seasons (${runs.filter((r) => r.seasons.some((x) => x.royalPlayed > 0)).length} of ${runs.length} careers); won ${roundRates.join(', ')}; ` +
+          `crowned ${called.filter((x) => x.honours.includes('royalCrown')).length} times, in ${crowned} careers`,
+      );
+
+      // By his stars that season: how often the call comes, and how often the crown follows it.
+      for (const [name, lo, hi] of [
+        ['under 3.5', 0, 3.5],
+        ['3.5 to 3.9', 3.5, 3.9],
+        ['3.9 and up', 3.9, 9],
+      ] as const) {
+        const rows = seasonsAll.filter((x) => x.stars >= lo && x.stars < hi && x.division === 2);
+        const calls = rows.filter((x) => x.royalPlayed > 0);
+        lines.push(
+          `  stars ${name.padEnd(10)} (${String(rows.length).padStart(3)} Great Houses seasons): called ${pct(rate2(calls.length, rows.length))}, ` +
+            `crowned in ${calls.filter((x) => x.honours.includes('royalCrown')).length} of ${calls.length} calls, rounds won ${calls.reduce((t, x) => t + x.royalWon, 0)} of ${calls.reduce((t, x) => t + x.royalPlayed, 0)}`,
+        );
+      }
+
+      // The form model, refitted on these careers' starts against the frozen one: par and the lean on his stars over the
+      // rivals as frozen (keepers: par alone), then whether anything left out of it (his teammates) clearly matters.
+      const rowsOf = (keeper: boolean) => runs.flatMap((r) => r.matches).filter((m) => m.keeper === keeper);
+      const fit = (keeper: boolean, mates: boolean) => {
+        const rows = rowsOf(keeper);
+        const x = (m: MatchRow) => [1, ...(keeper ? [] : [m.gap]), ...(mates ? [m.mates] : [])];
+        return {
+          n: rows.length,
+          ...ols(
+            rows.map(x),
+            rows.map((m) => m.rating),
+          ),
+        };
+      };
+      const out = fit(false, false);
+      const gk = fit(true, false);
+      const outMates = fit(false, true);
+      const gkMates = fit(true, true);
+      const frozen = RATING_FIT;
+      const ci = (f: typeof out, i: number) => `${f2(f.b[i] ?? NaN)} ± ${f2(2 * (f.se[i] ?? 0))}`;
+      lines.push(
+        '',
+        `form fit, outfield (${out.n} starts): par ${ci(out, 0)} + ${ci(out, 1)} a tier of stars over the rivals, sd ${f2(out.sd)}; ` +
+          `a tier of teammates ${ci(outMates, 2)} (frozen par ${frozen.outfield.par} + ${frozen.outfield.perTier}, sd ${frozen.outfield.sd})`,
+        `form fit, keeper (${gk.n} starts): par ${ci(gk, 0)}, sd ${f2(gk.sd)}; a tier of teammates ${ci(gkMates, 1)} ` +
+          `(frozen par ${frozen.gk.par}, sd ${frozen.gk.sd})`,
+      );
+      const near = (name: string, value: number, fitted: number | undefined, se: number | undefined) => {
+        if (fitted === undefined || se === undefined || Math.abs(value - fitted) > 2 * se + 0.02)
+          failures.push(
+            `form fit ${name}: frozen ${value}, fitted ${f2(fitted ?? NaN)} ± ${f2(2 * (se ?? 0))}`,
+          );
+      };
+      // A term the model leaves out is safe to leave out while it is clearly small: at most LEAN beyond 2 SE.
+      const flat = (name: string, fitted: number | undefined, se: number | undefined) => {
+        if (fitted === undefined || se === undefined || Math.abs(fitted) - 2 * se > LEAN)
+          failures.push(`ratings lean on ${name}: ${f2(fitted ?? NaN)} ± ${f2(2 * (se ?? 0))}`);
+      };
+      if (out.n >= 100) {
+        near('outfield par', frozen.outfield.par, out.b[0], out.se[0]);
+        near('outfield lean on stars', frozen.outfield.perTier, out.b[1], out.se[1]);
+        flat('outfield teammates', outMates.b[2], outMates.se[2]);
+        if (Math.abs(out.sd - frozen.outfield.sd) > 0.1)
+          failures.push(`outfield rating sd ${f2(out.sd)}, frozen ${frozen.outfield.sd}`);
+      }
+      if (gk.n >= 100) {
+        near('keeper par', frozen.gk.par, gk.b[0], gk.se[0]);
+        flat('keeper teammates', gkMates.b[1], gkMates.se[1]);
+        if (Math.abs(gk.sd - frozen.gk.sd) > 0.1)
+          failures.push(`keeper rating sd ${f2(gk.sd)}, frozen ${frozen.gk.sd}`);
+      }
+
+      lines.push(
+        '',
+        failures.length ? `FAILED:\n  ${[...new Set(failures)].join('\n  ')}` : 'All checks passed.',
+      );
+      console.log(lines.join('\n'));
+      expect(failures).toEqual([]);
+    },
+    CAREER_TIMEOUT,
+  );
