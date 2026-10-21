@@ -33,6 +33,7 @@ import { CHARGE, FRESH, HOLD, STAMINA_MAX } from '../../modes/manager/stamina';
 import { SQUAD_SIZE, STARTERS, type SquadKnight } from '../../modes/manager/types';
 import { MatchRunner } from '../../modes/runner';
 import { houseById, type House } from '../../setup/houses';
+import { rateMatch } from '../../stats/ratings';
 import { choice } from '../choice';
 import { button, h } from '../dom';
 import { dragToSwap } from '../drag';
@@ -825,6 +826,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
               steps: runner.step,
               timeline: [],
               goals: runner.goals,
+              ratings: rateMatch(runner.stats),
             }),
           );
           refresh(fixture);

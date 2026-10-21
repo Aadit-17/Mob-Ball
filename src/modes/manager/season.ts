@@ -1,8 +1,10 @@
 import { DEFAULT_TACTICS, type Tactics } from '../../ai/tactics';
 import { ROLES_BY_SIZE } from '../../game/formation';
 import type { KnightSpec } from '../../game/match';
+import type { Role } from '../../game/types';
 import type { Look } from '../../knight/look';
-import type { FixtureConfig, GoalLog, Manager, TimedAction } from '../runner';
+import { MAX_RATING, MIN_RATING, type MatchRatings } from '../../stats/ratings';
+import { SUBS_ALLOWED, type FixtureConfig, type GoalLog, type Manager, type TimedAction } from '../runner';
 import {
   applyPick,
   autoPick,
@@ -59,9 +61,17 @@ export interface FixtureGoal {
   readonly ownGoal: boolean;
 }
 
+/** A knight's match rating to one decimal (enough for a 3–10 scale), and the position he played longest.
+ * A pair rather than an object: a season saves about 500 of them. */
+export type FixtureRating = readonly [rating: number, role: Role];
+
 /** What happened in one played fixture beyond its score; later stats hang off the same record. */
 export interface FixtureRecord {
   readonly goals: readonly FixtureGoal[];
+  /** Everyone who played, substitutes included, by squad id. */
+  readonly ratings: Readonly<Record<string, FixtureRating>>;
+  /** The man of the match, by squad id. */
+  readonly motm: string;
 }
 
 /** A Manager mode season: the draft, then the league once the draft is done. */
@@ -208,6 +218,8 @@ export interface MatchOutcome {
   readonly timeline: readonly TimedAction[];
   /** Every goal with the runner knight credited, as `MatchRunner.goals` logs them. */
   readonly goals: readonly GoalLog[];
+  /** Every knight's rating by runner id, as `rateMatch(runner.stats)` gives them. */
+  readonly ratings: MatchRatings;
 }
 
 /** Everything needed to play one league fixture, watched or headless, and to record it afterwards. */
@@ -261,7 +273,11 @@ export function planMatch(season: SeasonState, fixture: LeagueFixture): MatchPla
         };
         return afterMatchday(current.stamina[side.house] ?? {}, play);
       };
-      const record = { goals: fixtureGoals([left, right], subs, outcome.goals, playerAway) };
+      const ids = runnerSquadIds([left.lineup, right.lineup], subs);
+      const record: FixtureRecord = {
+        goals: fixtureGoals(ids, outcome.goals, playerAway),
+        ...fixtureRatings(ids, outcome.ratings),
+      };
       return {
         ...current,
         league: recordResult(current.league, fixture.matchday, fixture.index, score),
@@ -318,17 +334,32 @@ export function runnerSquadIds(
 
 /** The runner's goal log in squad ids, sides turned to home and away. */
 function fixtureGoals(
-  sides: readonly [Side, Side],
-  subs: readonly [Substitution | null, Substitution | null],
+  ids: ReadonlyMap<number, string>,
   log: readonly GoalLog[],
   playerAway: boolean,
 ): FixtureGoal[] {
-  const ids = runnerSquadIds([sides[0].lineup, sides[1].lineup], subs);
   return log.map((goal) => ({
     side: (playerAway ? 1 - goal.team : goal.team) as 0 | 1,
     scorer: goal.scorerId === null ? null : (ids.get(goal.scorerId) ?? null),
     ownGoal: goal.ownGoal,
   }));
+}
+
+export const roundRating = (rating: number): number => Math.round(rating * 10) / 10;
+
+/** The runner's ratings in squad ids, rounded for the save. Every knight who played has a squad id. */
+function fixtureRatings(
+  ids: ReadonlyMap<number, string>,
+  ratings: MatchRatings,
+): Pick<FixtureRecord, 'ratings' | 'motm'> {
+  const squadId = (runnerId: number): string => {
+    const id = ids.get(runnerId);
+    if (id === undefined) throw new Error(`Runner knight ${String(runnerId)} has no squad id`);
+    return id;
+  };
+  const rated = ratings.knights.map((k) => [squadId(k.id), [roundRating(k.rating), k.role]]);
+  if (ratings.motm === null) throw new Error('A played fixture always has a man of the match');
+  return { ratings: Object.fromEntries(rated) as Record<string, FixtureRating>, motm: squadId(ratings.motm) };
 }
 
 /** One row of the league's scoring chart. */
@@ -388,19 +419,53 @@ function normalizeGoal(raw: unknown): FixtureGoal | null {
   return scorer === null || typeof scorer === 'string' ? { side, scorer, ownGoal } : null;
 }
 
+const RATED_ROLES: readonly string[] = ROLES;
+
+function normalizeRating(raw: unknown): FixtureRating | null {
+  if (!Array.isArray(raw) || raw.length !== 2) return null;
+  const [rating, role] = raw as unknown[];
+  const fits = typeof rating === 'number' && rating >= MIN_RATING && rating <= MAX_RATING;
+  return fits && typeof role === 'string' && RATED_ROLES.includes(role)
+    ? [roundRating(rating), role as Role]
+    : null;
+}
+
+/** Ratings for each side's four starters and at most its substitutes, all from the two squads. */
+function normalizeRatings(
+  raw: unknown,
+  squads: readonly (readonly SquadKnight[])[],
+): Record<string, FixtureRating> | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const entries = Object.entries(raw as Record<string, unknown>).map(
+    ([id, r]) => [id, normalizeRating(r)] as const,
+  );
+  if (!entries.every((e): e is readonly [string, FixtureRating] => e[1] !== null)) return null;
+  const sideOf = (id: string): number => squads.findIndex((squad) => squad.some((k) => k.id === id));
+  if (entries.some(([id]) => sideOf(id) < 0)) return null;
+  const counts = [0, 1].map((side) => entries.filter(([id]) => sideOf(id) === side).length);
+  const full = counts.every((n) => n >= STARTERS && n <= STARTERS + SUBS_ALLOWED);
+  return full ? Object.fromEntries(entries) : null;
+}
+
 /** A played fixture's record, or null unless every goal is by a knight on the right side (the other
- * side's for an own goal) and neither side has more goals logged than it scored. */
+ * side's for an own goal) who played, neither side has more goals logged than it scored, and everyone
+ * who played is rated, the man of the match among them. */
 function normalizeRecord(raw: unknown, draft: DraftState, fixture: LeagueFixture): FixtureRecord | null {
   const score = fixture.score;
-  const goals = (raw as Record<string, unknown> | null)?.goals;
+  const source = raw as Record<string, unknown> | null;
+  const goals = source?.goals;
   if (!score || !Array.isArray(goals)) return null;
   const read = goals.map(normalizeGoal);
   if (!read.every((g): g is FixtureGoal => g !== null)) return null;
   const squads = [squadOf(draft, fixture.home), squadOf(draft, fixture.away)];
+  const ratings = normalizeRatings(source?.ratings, squads);
+  const motm = source?.motm;
+  if (!ratings || typeof motm !== 'string' || !(motm in ratings)) return null;
   const fits = (g: FixtureGoal): boolean =>
-    g.scorer === null || (squads[g.ownGoal ? 1 - g.side : g.side] ?? []).some((k) => k.id === g.scorer);
+    g.scorer === null ||
+    ((squads[g.ownGoal ? 1 - g.side : g.side] ?? []).some((k) => k.id === g.scorer) && g.scorer in ratings);
   const within = ([0, 1] as const).every((side) => read.filter((g) => g.side === side).length <= score[side]);
-  return read.every(fits) && within ? { goals: read } : null;
+  return read.every(fits) && within ? { goals: read, ratings, motm } : null;
 }
 
 function normalizeRecords(

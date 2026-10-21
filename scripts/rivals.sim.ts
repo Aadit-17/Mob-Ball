@@ -20,6 +20,7 @@ import {
 import { FRESH, squadKnightSpec, STAMINA_MAX } from '../src/modes/manager/stamina';
 import type { SquadKnight } from '../src/modes/manager/types';
 import { MatchRunner, type FixtureConfig, type Manager } from '../src/modes/runner';
+import { rateMatch } from '../src/stats/ratings';
 
 const SEASONS = Number(process.env.SEASONS ?? 12);
 const ROLES: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
@@ -68,7 +69,11 @@ function playSeason(seed: number): void {
       const [home, away] = runner.state.score;
       sideGoals.push(home, away);
       const outcome = { score: [home, away] as const, steps: runner.step, timeline: runner.timeline };
-      const finished = plan.finish(season, { ...outcome, goals: runner.goals });
+      const finished = plan.finish(season, {
+        ...outcome,
+        goals: runner.goals,
+        ratings: rateMatch(runner.stats),
+      });
       const rivals = ([0, 1] as const)
         .filter((t) => plan.sides[t].manager)
         .map((team) => ({ team, log: sideLog(season, plan, runner, team, team === 0 ? l - r : r - l) }));

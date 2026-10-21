@@ -9,8 +9,9 @@ const SETTINGS_KEY = 'mobball.settings.v1';
 const MUTED_KEY = 'mobball.muted.v1';
 const CUP_KEY = 'mobball.cup.v1';
 const HONOURS_KEY = 'mobball.honours.v1';
-/** v2: the draft pool and budget changed, so a v1 season can't be replayed. */
-const SEASON_KEY = 'mobball.season.v2';
+/** v2: the draft pool and budget changed, so a v1 season can't be replayed. v3: every fixture keeps its
+ * ratings, which a v2 season never recorded and can't rebuild (watched matches aren't replayable). */
+const SEASON_KEY = 'mobball.season.v3';
 
 export interface Preferences {
   houseId: string;

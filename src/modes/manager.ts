@@ -3,6 +3,7 @@ import { skillFor } from '../ai/skills';
 import { BUILDS } from '../game/constants';
 import { randomSeed } from '../game/rng';
 import { houseById } from '../setup/houses';
+import { rateMatch } from '../stats/ratings';
 import { squadOf, TOTAL_PICKS } from './manager/draft';
 import { champion, currentMatchday, isFinished, MATCHDAYS, playerFixture, table } from './manager/league';
 import { knightStamina, planMatch, startSeason, type MatchPlan, type SeasonState } from './manager/season';
@@ -77,12 +78,12 @@ export const draftProgress = (season: SeasonState): number => season.draft.picks
 function finishPlayerMatch(
   app: AppContext,
   plan: MatchPlan,
-  result: Pick<MatchResult, 'score' | 'steps' | 'timeline' | 'goalLog'>,
+  result: Pick<MatchResult, 'score' | 'steps' | 'timeline' | 'goalLog' | 'ratings'>,
 ): void {
   const season = app.season;
   if (!season?.league || playerFixture(season.league)?.score) return;
-  const { score, steps, timeline, goalLog } = result;
-  app.setSeason(plan.finish(season, { score, steps, timeline, goals: goalLog }));
+  const { score, steps, timeline, goalLog, ratings } = result;
+  app.setSeason(plan.finish(season, { score, steps, timeline, goals: goalLog, ratings }));
 }
 
 /** Plays the player's match of the current matchday without watching it: the same match, instantly. */
@@ -98,6 +99,7 @@ export function skipPlayerMatch(app: AppContext): void {
     steps: runner.step,
     timeline: runner.timeline,
     goalLog: runner.goals,
+    ratings: rateMatch(runner.stats),
   });
 }
 

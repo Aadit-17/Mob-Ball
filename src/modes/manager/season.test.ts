@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LOOK } from '../../knight/look';
 import { knightById } from '../../game/match';
+import { rateMatch } from '../../stats/ratings';
 import { MatchRunner } from '../runner';
 import { DRAFT_HOUSES, isDraftComplete, squadOf } from './draft';
 import {
@@ -53,6 +54,7 @@ function playFixture(season: SeasonState, fixture: LeagueFixture, dugout?: (r: M
     steps: runner.step,
     timeline: runner.timeline,
     goals: runner.goals,
+    ratings: rateMatch(runner.stats),
   };
   return { season: plan.finish(season, outcome), runner, plan };
 }
@@ -296,9 +298,12 @@ describe('league scorers', () => {
       { side: 1, scorer: a0.id, ownGoal: false },
       { side: 0, scorer: null, ownGoal: false },
     ];
+    const record = recordOf(season, fixture);
+    if (!record) throw new Error('No record');
     const only = {
       ...season,
       records: replaceRecord({ ...season, records: season.records.map((d) => d.map(() => null)) }, fixture, {
+        ...record,
         goals,
       }),
     };
@@ -337,10 +342,13 @@ describe('league scorers', () => {
     const raw = JSON.parse(JSON.stringify(season)) as Record<string, unknown>;
     const withGoals = (goals: unknown): unknown => ({
       ...raw,
-      records: replaceRecord(season, fixture, { goals }),
+      records: replaceRecord(season, fixture, { ...recordOf(season, fixture), goals }),
     });
-    const [home] = squadOf(season.draft, fixture.home);
-    const [away] = squadOf(season.draft, fixture.away);
+    // Scorers must have played: one rated knight from each side.
+    const rated = Object.keys(recordOf(season, fixture)?.ratings ?? {});
+    const playedFor = (house: string) => squadOf(season.draft, house).find((k) => rated.includes(k.id));
+    const home = playedFor(fixture.home);
+    const away = playedFor(fixture.away);
     const outsider = DRAFT_HOUSES.filter((h) => h !== fixture.home && h !== fixture.away)
       .map((h) => squadOf(season.draft, h)[0])
       .at(0);
@@ -370,5 +378,131 @@ describe('league scorers', () => {
     ).toBeNull();
     const unplayed = season.records.map((day, d) => (d === 1 ? day.map(() => ({ goals: [] })) : day));
     expect(normalizeSeason({ ...raw, records: unplayed })).toBeNull();
+  });
+});
+
+describe('league ratings', () => {
+  /** The runner's ratings by knight name, rounded as saved. Names are unique across the pool, so this
+   * checks the saved squad ids without trusting the id mapping under test. */
+  function expectRatingsAsRun({ season, runner, plan }: Played): void {
+    const name = (id: number): string => knightById(runner.state, id)?.look.name ?? '?';
+    const ratings = rateMatch(runner.stats);
+    const ran = Object.fromEntries(
+      ratings.knights.map((k) => [name(k.id), [Math.round(k.rating * 10) / 10, k.role]]),
+    );
+    const record = recordOf(season, plan.fixture);
+    const saved = Object.fromEntries(
+      Object.entries(record?.ratings ?? {}).map(([id, r]) => [squadName(season, id) ?? '?', r] as const),
+    );
+    expect(saved).toEqual(ran);
+    expect(squadName(season, record?.motm ?? null)).toBe(name(ratings.motm ?? -1));
+  }
+
+  const subForward = (runner: MatchRunner, season: SeasonState): void => {
+    const fixture = playerFixture(season.league ?? (null as never));
+    const on = fixture && planMatch(season, fixture).sides[0].bench[0];
+    if (on) runner.act(0, { kind: 'substitution', offId: STARTERS - 1, on });
+  };
+
+  it("saves every knight's rating, substitutes included, for the player's match and every rival fixture", () => {
+    const runs = matchdayRuns(drafted(), subForward);
+    expect(runs).toHaveLength(4);
+    for (const run of runs) expectRatingsAsRun(run);
+    const [mine] = runs;
+    if (!mine) throw new Error('No fixture');
+    // The dugout's substitute played, so the player's side has five rated knights.
+    const sub = playerLineup(drafted()).bench[0];
+    expect(Object.keys(recordOf(mine.season, mine.plan.fixture)?.ratings ?? {})).toContain(sub?.id);
+  });
+
+  it("numbers a rival manager's substitute the same way for his rating", () => {
+    const found = [5, 15, 27, ...Array.from({ length: 20 }, (_, i) => i + 1)].some((seed) => {
+      const season = drafted(seed);
+      return fixtures(season.league ?? (null as never), 0).some((fixture) => {
+        if (fixture.home === PLAYER || fixture.away === PLAYER) return false;
+        const run = playFixture(season, fixture);
+        expectRatingsAsRun(run);
+        return run.runner.state.substituted.length > 0;
+      });
+    });
+    expect(found).toBe(true);
+  }, 60_000);
+
+  it('saves ratings to one decimal and reads them back', () => {
+    const season = playMatchday(drafted());
+    const all = season.records.flat().flatMap((r) => Object.values(r?.ratings ?? {}));
+    expect(all.length).toBeGreaterThanOrEqual(4 * 2 * STARTERS);
+    for (const [rating] of all) expect(Math.round(rating * 10) / 10).toBe(rating);
+    expect(roundTrip(season)).toEqual(season);
+  });
+
+  it('rejects rating records that cannot have happened', () => {
+    const season = playMatchday(drafted());
+    const fixture = fixtures(season.league ?? (null as never), 0)[0];
+    const record = fixture && recordOf(season, fixture);
+    if (!fixture || !record) throw new Error('No record');
+    const raw = JSON.parse(JSON.stringify(season)) as Record<string, unknown>;
+    const withRecord = (changes: Record<string, unknown>): unknown => ({
+      ...raw,
+      records: season.records.map((day, d) =>
+        d === fixture.matchday
+          ? day.map((r, i) => (i === fixture.index ? { ...record, ...changes } : r))
+          : day,
+      ),
+    });
+    const [id, first] = Object.entries(record.ratings)[0] ?? [];
+    if (!id || !first) throw new Error('No ratings');
+    const rate = (rating: unknown, role: unknown = first[1]): unknown =>
+      withRecord({ ratings: { ...record.ratings, [id]: [rating, role] } });
+    const outsider = squadOf(
+      season.draft,
+      DRAFT_HOUSES.find((h) => h !== fixture.home && h !== fixture.away) ?? '',
+    )[0];
+    const homeBench = squadOf(season.draft, fixture.home).filter((k) => !(k.id in record.ratings));
+    const { [id]: dropped, ...withoutOne } = record.ratings;
+
+    expect(normalizeSeason(withRecord({}))).not.toBeNull();
+    expect(normalizeSeason(rate(3))).not.toBeNull();
+    expect(normalizeSeason(rate(10))).not.toBeNull();
+    expect(normalizeSeason(rate(2.9))).toBeNull();
+    expect(normalizeSeason(rate(10.1))).toBeNull();
+    expect(normalizeSeason(rate('7.0'))).toBeNull();
+    expect(normalizeSeason(rate(Number.NaN))).toBeNull();
+    expect(normalizeSeason(rate(7, 'striker'))).toBeNull();
+    // Missing ratings, all of them or one side's starter.
+    expect(normalizeSeason(withRecord({ ratings: undefined }))).toBeNull();
+    expect(normalizeSeason(withRecord({ ratings: {} }))).toBeNull();
+    expect(normalizeSeason(withRecord({ ratings: [first] }))).toBeNull();
+    expect(dropped).toBeDefined();
+    expect(
+      normalizeSeason(
+        withRecord({ ratings: withoutOne, motm: record.motm === id ? undefined : record.motm }),
+      ),
+    ).toBeNull();
+    // A knight from neither squad, and more knights than a side can field.
+    expect(
+      normalizeSeason(withRecord({ ratings: { ...record.ratings, [outsider?.id ?? '']: first } })),
+    ).toBeNull();
+    const extra = Object.fromEntries(homeBench.map((k) => [k.id, first]));
+    expect(homeBench.length).toBe(2);
+    expect(normalizeSeason(withRecord({ ratings: { ...record.ratings, ...extra } }))).toBeNull();
+    // The man of the match must have played.
+    expect(normalizeSeason(withRecord({ motm: homeBench[0]?.id }))).toBeNull();
+    expect(normalizeSeason(withRecord({ motm: null }))).toBeNull();
+  });
+
+  it('rejects a scorer who was never rated', () => {
+    const season = playMatchday(drafted());
+    const fixture = fixtures(season.league ?? (null as never), 0).find((f) => (f.score?.[0] ?? 0) > 0);
+    const record = fixture && recordOf(season, fixture);
+    if (!fixture || !record) throw new Error('No home goals on matchday 1');
+    const bench = squadOf(season.draft, fixture.home).find((k) => !(k.id in record.ratings));
+    const raw = JSON.parse(JSON.stringify(season)) as Record<string, unknown>;
+    const goals = [{ side: 0, scorer: bench?.id, ownGoal: false }];
+    const records = season.records.map((day, d) =>
+      d === fixture.matchday ? day.map((r, i) => (i === fixture.index ? { ...record, goals } : r)) : day,
+    );
+    expect(bench).toBeDefined();
+    expect(normalizeSeason({ ...raw, records })).toBeNull();
   });
 });
