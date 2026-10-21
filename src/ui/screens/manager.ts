@@ -8,6 +8,18 @@ import { option } from '../../knight/catalog';
 import { managerSession, ordinal, settleSeason, skipPlayerMatch, standing } from '../../modes/manager';
 import { squadOf } from '../../modes/manager/draft';
 import {
+  playerOfTheSeason,
+  qualifying,
+  recentRatings,
+  seasonForm,
+  squadByForm,
+  teamOfTheSeason,
+  topRated,
+  currentForm,
+  FORM_MATCHES,
+  type KnightSeason,
+} from '../../modes/manager/form';
+import {
   champion,
   currentMatchday,
   fixtures,
@@ -40,6 +52,7 @@ import { dragToSwap } from '../drag';
 import { banner, blockColour, crest, icon } from '../heraldry';
 import { lozengeBurst, reducedMotion, throughTheGates } from '../motion';
 import { drawPortrait } from '../portrait';
+import { ratingBand, shownRating } from '../ratings';
 import { ROLE_NAMES, stars } from './setup';
 
 /** Steps of a headless match per frame: about 8 ms, so the page stays smooth while the others play. */
@@ -52,6 +65,8 @@ const ROLES = ROLES_BY_SIZE[4];
 /** Rows of the scoring chart on the hub, and on the season-end screen. */
 const SCORERS_ON_HUB = 8;
 const SCORERS_AT_END = 10;
+/** Rows of the top-rated chart beside the scorers on the hub. */
+const RATED_ON_HUB = 8;
 
 const PRESETS = [
   { value: 'charge', label: 'Charge!', tactics: CHARGE },
@@ -235,20 +250,39 @@ interface ScorersOptions {
   readonly boot: boolean;
 }
 
-/** One knight on the scoring chart: place, portrait, name, house and goals. */
-function scorerRow(row: ScorerRow, place: number, playerHouse: string, boot: boolean): HTMLElement {
-  const house = houseById(row.house);
+/** A rating in its football-game colour band, as on the full-time screen. */
+const ratingChip = (rating: number, small = false): HTMLElement =>
+  h('span', { class: `rt-score ${ratingBand(rating)}${small ? ' is-chip' : ''}`, text: shownRating(rating) });
+
+/** What a chart row shows besides the knight: its place, extra classes, a badge and the figure on the right. */
+interface ChartRowParts {
+  readonly place: string;
+  readonly classes: readonly (string | false)[];
+  /** After the house name, e.g. "9 apps". */
+  readonly note?: string;
+  readonly badge?: HTMLElement | false;
+  readonly figure: HTMLElement;
+}
+
+/** One knight on a league chart: place, portrait, name and house, a badge, and his figure. */
+function chartRow(
+  knight: SquadKnight,
+  houseId: string,
+  playerHouse: string,
+  parts: ChartRowParts,
+): HTMLElement {
+  const house = houseById(houseId);
   const canvas = h('canvas', { attrs: { 'aria-hidden': 'true' } });
-  drawPortrait(canvas, row.knight.look, house.colour, { width: 36, height: 42 });
-  const forged = row.knight.forged;
-  const li = h(
+  drawPortrait(canvas, knight.look, house.colour, { width: 36, height: 42 });
+  const forged = knight.forged;
+  return h(
     'li',
     {
-      class: ['scorer', forged && 'is-forged', row.house === playerHouse && 'is-you', boot && 'is-boot']
+      class: ['scorer', forged && 'is-forged', houseId === playerHouse && 'is-you', ...parts.classes]
         .filter(Boolean)
         .join(' '),
     },
-    h('span', { class: 'scorer-pos', text: String(place) }),
+    h('span', { class: 'scorer-pos', text: parts.place }),
     canvas,
     h(
       'span',
@@ -256,20 +290,174 @@ function scorerRow(row: ScorerRow, place: number, playerHouse: string, boot: boo
       h(
         'span',
         { class: 'scorer-name' },
-        h('b', { text: row.knight.look.name }),
+        h('b', { text: knight.look.name }),
         forged && h('small', { class: 'you-tag', text: 'Your knight' }),
       ),
-      h('small', { class: 'scorer-house' }, shield(house), h('span', { text: house.name })),
+      h(
+        'small',
+        { class: 'scorer-house' },
+        shield(house),
+        h('span', { text: house.name }),
+        parts.note && h('span', { class: 'scorer-note', text: `· ${parts.note}` }),
+      ),
     ),
-    boot && h('span', { class: 'scorer-boot', attrs: { title: 'Golden Boot' } }, icon('ball'), 'Golden Boot'),
-    h(
+    parts.badge,
+    parts.figure,
+  );
+}
+
+/** One knight on the scoring chart: place, portrait, name, house and goals. */
+const scorerRow = (row: ScorerRow, place: number, playerHouse: string, boot: boolean): HTMLElement =>
+  chartRow(row.knight, row.house, playerHouse, {
+    place: String(place),
+    classes: [boot && 'is-boot'],
+    badge:
+      boot &&
+      h('span', { class: 'scorer-boot', attrs: { title: 'Golden Boot' } }, icon('ball'), 'Golden Boot'),
+    figure: h(
       'span',
       { class: 'scorer-goals' },
       h('b', { text: String(row.goals) }),
       h('span', { class: 'visually-hidden', text: row.goals === 1 ? ' goal' : ' goals' }),
     ),
+  });
+
+const appsText = (n: number): string => `${n} ${n === 1 ? 'app' : 'apps'}`;
+const matchesText = (n: number): string => `${n} ${n === 1 ? 'match' : 'matches'}`;
+
+/** A knight's season average on the right of a chart row, said in full for screen readers. */
+const averageFigure = (k: KnightSeason): HTMLElement =>
+  h(
+    'span',
+    { class: 'scorer-goals rated-avg' },
+    h('span', { class: 'visually-hidden', text: 'Average rating ' }),
+    ratingChip(k.average),
   );
-  return li;
+
+/** The league's best season averages; the forged knight is added below when he qualifies but sits lower. */
+function ratedPanel(season: SeasonState, limit: number): HTMLElement {
+  const min = qualifying(season);
+  const rows = topRated(season, min);
+  const shown = rows.slice(0, limit);
+  // Knights level on the average as shown share a place, as on the scoring chart.
+  const shownAt = rows.map((k) => shownRating(k.average));
+  const places = shownAt.map((shown) => shownAt.indexOf(shown) + 1);
+  const forgedAt = rows.findIndex((k) => k.knight.forged);
+  const extra = forgedAt >= limit ? rows[forgedAt] : undefined;
+  const item = (k: KnightSeason, i: number): HTMLElement =>
+    chartRow(k.knight, k.house, season.draft.playerHouse, {
+      place: String(places[i] ?? i + 1),
+      classes: [],
+      note: appsText(k.appearances),
+      figure: averageFigure(k),
+    });
+  return h(
+    'section',
+    { class: 'md-scorers md-rated panel' },
+    h(
+      'h3',
+      { class: 'panel-title' },
+      'Top rated',
+      h('small', { class: 'panel-note', text: `Average · ${min}+ ${min === 1 ? 'match' : 'matches'}` }),
+    ),
+    rows.length
+      ? h(
+          'ol',
+          { class: 'scorer-list', attrs: { 'aria-label': 'Top rated' } },
+          ...shown.map(item),
+          forgedAt > limit && h('li', { class: 'scorer-gap', attrs: { 'aria-hidden': 'true' }, text: '⋯' }),
+          extra && item(extra, forgedAt),
+        )
+      : h('p', { class: 'md-empty', text: 'No ratings yet. Every knight is rated after every match.' }),
+  );
+}
+
+/** The best average in each position, as a line of four cards; the player of the season wears the star. */
+function teamPanel(season: SeasonState): HTMLElement | null {
+  const team = teamOfTheSeason(season);
+  if (team.every((slot) => !slot.knight)) return null;
+  const best = playerOfTheSeason(season);
+  const card = ({ role, knight: k }: (typeof team)[number]): HTMLElement => {
+    if (!k)
+      return h(
+        'article',
+        { class: 'tots-card is-empty' },
+        h('span', { class: 'squad-slot', text: ROLE_NAMES[role] }),
+        h('small', { text: 'Nobody played enough' }),
+      );
+    const house = houseById(k.house);
+    const star = k.knight.id === best?.knight.id;
+    const canvas = h('canvas', { attrs: { 'aria-hidden': 'true' } });
+    drawPortrait(canvas, k.knight.look, house.colour, { width: 110, height: 128 });
+    return h(
+      'article',
+      {
+        class: ['tots-card', k.knight.forged && 'is-forged', star && 'is-best'].filter(Boolean).join(' '),
+        attrs: {
+          'aria-label': `${ROLE_NAMES[role]}: ${k.knight.look.name} of ${house.name}, average ${shownRating(k.average)} in ${matchesText(k.appearances)}, man of the match ${k.motm} ${k.motm === 1 ? 'time' : 'times'}${star ? ', player of the season' : ''}.`,
+        },
+      },
+      h('span', { class: 'squad-slot', text: ROLE_NAMES[role] }),
+      canvas,
+      h('b', { text: k.knight.look.name }),
+      h('small', { class: 'scorer-house' }, shield(house), h('span', { text: house.name })),
+      h(
+        'span',
+        {
+          class: 'tots-figures',
+          attrs: {
+            'aria-hidden': 'true',
+            title: `Man of the match ${k.motm} ${k.motm === 1 ? 'time' : 'times'}`,
+          },
+        },
+        ratingChip(k.average),
+        h('small', { text: `${appsText(k.appearances)}${k.motm ? ` · ★ ${k.motm}` : ''}` }),
+      ),
+      k.knight.forged && h('small', { class: 'you-tag', text: 'Your knight' }),
+      star && h('span', { class: 'scorer-boot tots-best' }, '★ Player of the season'),
+    );
+  };
+  return h(
+    'section',
+    { class: 'md-team panel' },
+    h(
+      'h3',
+      { class: 'panel-title' },
+      'Team of the season',
+      h('small', {
+        class: 'panel-note',
+        text: `Best average in each position · ${qualifying(season)}+ matches`,
+      }),
+    ),
+    h('div', { class: 'tots-row' }, ...team.map(card)),
+  );
+}
+
+/** "Player of the season: Ser Lionel of Thorn, 7.6 average in 12 matches." */
+function playerOfTheSeasonLine(season: SeasonState): string | null {
+  const best = playerOfTheSeason(season);
+  if (!best) return null;
+  const house = houseById(best.house).name;
+  return `Player of the season: ${best.knight.look.name} of ${house}, ${shownRating(best.average)} average in ${matchesText(best.appearances)}.`;
+}
+
+/** A knight's season average and his last few ratings, oldest first, for his card on the team sheet. */
+function formStrip(form: KnightSeason | null): HTMLElement {
+  if (!form) return h('div', { class: 'squad-form is-none' }, h('small', { text: 'No matches yet' }));
+  return h(
+    'div',
+    { class: 'squad-form', attrs: { 'aria-hidden': 'true' } },
+    h('span', { class: 'squad-avg' }, h('small', { text: 'Avg' }), ratingChip(form.average)),
+    h('span', { class: 'form-chips' }, ...recentRatings(form).map((r) => ratingChip(r, true))),
+  );
+}
+
+/** "Season average 7.1 in 6 matches, last three 6.8, 7.4, 7.9." */
+function formWords(form: KnightSeason | null): string {
+  if (!form) return 'No matches yet.';
+  const recent = recentRatings(form).map(shownRating);
+  const last = recent.length === 1 ? 'last match' : `last ${recent.length}`;
+  return `Season average ${shownRating(form.average)} in ${matchesText(form.appearances)}, ${last} ${recent.join(', ')}.`;
 }
 
 /** The league's top scorers; the player's forged knight is shown even when he is outside the top rows. */
@@ -381,6 +569,7 @@ function playerResult(fixture: LeagueFixture, playerHouse: string): HTMLElement 
 function squadCard(
   knight: SquadKnight,
   stamina: number,
+  form: KnightSeason | null,
   house: House,
   slot: number,
   pressed: boolean,
@@ -400,7 +589,7 @@ function squadCard(
         type: 'button',
         'data-slot': String(slot),
         'aria-pressed': String(pressed),
-        'aria-label': `${knight.look.name}, ${slotName}. ${level}, ${build}${knight.forged ? ', your knight' : ''}. Stamina ${value}${value < FRESH ? ', tired' : ''}.`,
+        'aria-label': `${knight.look.name}, ${slotName}. ${level}, ${build}${knight.forged ? ', your knight' : ''}. Stamina ${value}${value < FRESH ? ', tired' : ''}. ${formWords(form)}`,
       },
       on: { click: onTap },
     },
@@ -414,6 +603,7 @@ function squadCard(
       level,
     ),
     h('small', { text: knight.forged ? `${build} · Your knight` : build }),
+    formStrip(form),
     staminaMeter(stamina, bench),
   );
   drawPortrait(canvas, knight.look, house.colour, { width: 110, height: 128 });
@@ -485,6 +675,24 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
         ),
       ),
     );
+
+  /** The player's knight in the best form lately, and whether he is on the bench. */
+  const inForm = (season: SeasonState): HTMLElement | false => {
+    const top = squadByForm(season, season.draft.playerHouse)[0];
+    if (!top?.form) return false;
+    const benched = !season.plan?.starters.includes(top.knight.id);
+    const recent = recentRatings(top.form).length;
+    return h(
+      'p',
+      { class: 'md-inform' },
+      h('span', { text: 'In form' }),
+      h('b', { text: top.knight.look.name }),
+      ratingChip(currentForm(top.form)),
+      h('small', {
+        text: `${recent === 1 ? 'last match' : `last ${recent}`}${benched ? ' · on the bench' : ''}`,
+      }),
+    );
+  };
 
   /** The player's four starters with their stamina, and a nudge when one of them is tired. */
   const teamSheet = (season: SeasonState): HTMLElement[] => {
@@ -570,6 +778,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
       h('h3', { class: 'md-house-head' }, houseBlock(house)),
       h('p', { class: 'md-standing', text: played ? standing(season) : 'Matchday 1: all to play for' }),
       ...teamSheet(season),
+      inForm(season),
       h('p', {
         class: 'md-tactics',
         text: `Press ${tactics.press} · Shooting ${tactics.shooting}`,
@@ -582,7 +791,12 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
     show(
       h('div', { class: 'md-hub' }, next, mine),
       leagueTable(league, { title: 'League table' }),
-      scorersPanel(season, { title: 'Top scorers', limit: SCORERS_ON_HUB, boot: false }),
+      h(
+        'div',
+        { class: 'md-boards' },
+        scorersPanel(season, { title: 'Top scorers', limit: SCORERS_ON_HUB, boot: false }),
+        ratedPanel(season, RATED_ON_HUB),
+      ),
     );
   }
 
@@ -591,6 +805,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
     const house = houseById(playerHouse);
     const knights = new Map(squadOf(season.draft, playerHouse).map((k) => [k.id, k]));
     const lineup = playerLineup(season);
+    const form = seasonForm(season);
     // Slots 0–3 are keeper, defender, midfield and forward; 4–5 the bench. Swaps keep four different starters.
     const order = [...lineup.starters.map((s) => s.knight.id), ...lineup.bench.map((k) => k.id)];
     let tactics = season.plan?.tactics ?? DEFAULT_TACTICS;
@@ -644,7 +859,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
       const knight = knights.get(order[slot] ?? '');
       if (!knight) return null;
       const stamina = knightStamina(season, playerHouse, knight.id);
-      return squadCard(knight, stamina, house, slot, picked === slot, () => {
+      return squadCard(knight, stamina, form.get(knight.id) ?? null, house, slot, picked === slot, () => {
         tap(slot);
       });
     };
@@ -740,7 +955,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
         h(
           'p',
           { class: 'hint squad-hint' },
-          'Drag a knight onto another to swap them, or tap one and then the other: between roles, or in and out of the side. Tired knights are slower; a match on the bench brings them back.',
+          `Drag a knight onto another to swap them, or tap one and then the other: between roles, or in and out of the side. Tired knights are slower; a match on the bench brings them back. Chips show each knight's last ${FORM_MATCHES} ratings.`,
         ),
         sheet,
         live,
@@ -879,8 +1094,23 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
     );
     const bootPanel = scorersPanel(season, { title: 'Top scorers', limit: SCORERS_AT_END, boot: true });
     const boot = goldenBoot(season);
+    const best = playerOfTheSeasonLine(season);
     const bootLine = (): HTMLElement | null =>
-      boot ? h('p', { class: 'md-boot' }, icon('ball'), h('span', { text: boot })) : null;
+      boot || best
+        ? h(
+            'div',
+            { class: 'md-honours' },
+            boot && h('p', { class: 'md-boot' }, icon('ball'), h('span', { text: boot })),
+            best &&
+              h(
+                'p',
+                { class: 'md-boot md-best' },
+                h('span', { class: 'md-star', text: '★' }),
+                h('span', { text: best }),
+              ),
+          )
+        : null;
+    const team = teamPanel(season);
 
     if (won && first && second) {
       const wins = app.honours.leagueWins;
@@ -919,6 +1149,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
           actions,
         ),
         leagueTable(league, { title: 'Final table' }),
+        ...(team ? [team] : []),
         bootPanel,
       );
       celebrate(house);
@@ -943,6 +1174,7 @@ export function mountManager(root: HTMLElement, app: AppContext): () => void {
         actions,
       ),
       leagueTable(league, { title: 'Final table' }),
+      ...(team ? [team] : []),
       bootPanel,
     );
   }

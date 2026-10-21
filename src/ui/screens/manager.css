@@ -724,6 +724,181 @@
   color: var(--gold);
 }
 
+/* ---------- ratings: chips, form, top rated ---------- */
+.rt-score.is-chip {
+  min-width: 30px;
+  padding: 2px 0 1px;
+  font-size: 13px;
+}
+
+.panel-note {
+  margin-left: 10px;
+  color: var(--text-2);
+  font: 700 12px/1.2 var(--font-hud);
+  letter-spacing: 0.5px;
+  text-transform: none;
+}
+
+.squad-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 8px;
+  margin-top: 6px;
+}
+
+.squad-form.is-none small {
+  font-size: 13px;
+}
+
+.squad-avg,
+.form-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.squad-card .squad-avg small {
+  color: var(--text-2);
+  font: 700 12px/1 var(--font-hud);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.md-inform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--text-2);
+  font: 700 15px/1.2 var(--font-hud);
+  letter-spacing: 0.3px;
+}
+
+.md-inform b {
+  color: #fff3d6;
+  font-size: 17px;
+}
+
+.md-inform small {
+  font-size: 13px;
+}
+
+/* Scorers and top rated side by side on the hub, one column each. */
+.md-boards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.md-boards .scorer-list {
+  columns: 1;
+}
+
+.scorer-note {
+  flex: none;
+}
+
+.rated-avg .rt-score {
+  min-width: 40px;
+  font-size: 17px;
+}
+
+/* ---------- team of the season ---------- */
+.md-team {
+  padding: 14px 16px 16px;
+}
+
+.tots-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tots-card {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 4px;
+  padding: 8px 8px 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #332e38, #25222a);
+  text-align: center;
+  box-shadow:
+    inset 0 0 0 2px var(--iron),
+    0 3px 0 var(--drop);
+}
+
+.tots-card canvas {
+  display: block;
+  width: 100%;
+  max-width: 110px;
+  aspect-ratio: 110 / 128;
+  background: radial-gradient(ellipse 55% 22% at 50% 92%, rgba(255, 176, 72, 0.2), transparent 70%);
+}
+
+.tots-card b {
+  max-width: 100%;
+  overflow: hidden;
+  color: #fff3d6;
+  font: 700 17px/1.15 var(--font-hud);
+  letter-spacing: 0.3px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tots-card .scorer-house {
+  justify-content: center;
+  max-width: 100%;
+}
+
+.tots-figures {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.tots-figures small,
+.tots-card.is-empty small {
+  color: var(--text-2);
+  font: 700 13px/1.2 var(--font-hud);
+}
+
+.tots-card.is-forged b {
+  color: var(--gold-text);
+}
+
+.tots-card.is-best {
+  background:
+    radial-gradient(ellipse 90% 50% at 50% 0%, rgba(242, 193, 78, 0.3), transparent 70%),
+    linear-gradient(180deg, #3a3340, #2a252e);
+  box-shadow:
+    inset 0 0 0 3px var(--gold-hi),
+    0 3px 0 var(--drop);
+}
+
+.tots-card .tots-best {
+  margin-top: 2px;
+  padding: 2px 7px;
+  font-size: 12px;
+  letter-spacing: 0.6px;
+  white-space: normal;
+}
+
+.md-honours {
+  display: grid;
+  gap: 6px;
+}
+
+.md-star {
+  margin-right: 6px;
+  color: var(--gold);
+}
+
 /* ---------- matchday results ---------- */
 .md-results .panel-title {
   margin: 4px 0 0;
@@ -827,8 +1002,13 @@
   }
 
   .md-hub,
+  .md-boards,
   .squad-sheet {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tots-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .md-ties {
@@ -887,8 +1067,14 @@
   }
 
   .league-table,
-  .md-scorers {
+  .md-scorers,
+  .md-team {
     padding: 12px 10px 10px;
+  }
+
+  .panel-note {
+    display: block;
+    margin: 2px 0 0;
   }
 
   .scorer {
