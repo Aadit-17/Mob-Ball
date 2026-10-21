@@ -561,6 +561,27 @@ describe('tactical substitutions', () => {
     expect(subsOver(rivalWith([tiredLegend]), home, whole([3, 0]))).toEqual([]);
   });
 
+  it('takes the keeper off only to rest him, never for a tactical change', () => {
+    const keeperAt = (stamina: number) =>
+      createRivalManager({
+        style: balanced,
+        starters: [stamina, 100, 100, 100],
+        bench: [{ spec: squadKnightSpec(knight('b', 0), 100, 'mid'), stamina: 100 }],
+        matchdaysLeft: 10,
+      });
+    const home = side([0, 2, 2, 2]);
+    for (const score of [
+      [0, 1],
+      [1, 1],
+      [2, 1],
+    ] as const) {
+      expect(subsOver(keeperAt(FRESH + 5), home, whole(score))).toEqual([]);
+    }
+    expect(subsOver(keeperAt(20), home, whole([1, 1])).map((s) => s.action)).toEqual([
+      { kind: 'substitution', offId: 0, on: squadKnightSpec(knight('b', 0), 100, 'mid') },
+    ]);
+  });
+
   it('never substitutes when the bench is no better, whatever the score', () => {
     const equal = { spec: squadKnightSpec(knight('e'), 100, 'mid'), stamina: 100 };
     const weaker = { spec: squadKnightSpec(knight('w', 1), 100, 'mid'), stamina: 100 };

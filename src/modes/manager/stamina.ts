@@ -302,6 +302,10 @@ function subValue(off: OnPitch, on: BenchOption, left: number, lead: number, wei
   return now + weight * (saved - spent);
 }
 
+/** The keeper only comes off to rest: tactical subs for him measured -0.31 ± 0.28 goals (rivals.sim, n 49),
+ * as the starter the outfield misses least is in goal already. */
+const mayComeOff = (knight: OnPitch): boolean => knight.role !== 'gk' || knight.stamina < FRESH;
+
 /** A rival's touchline: one substitution when it helps, then tactics late on. At most one action a poll. */
 export function createRivalManager(setup: RivalSetup): RivalManager {
   if (setup.starters.length !== STARTERS || !setup.starters.every(Number.isFinite))
@@ -317,6 +321,7 @@ export function createRivalManager(setup: RivalSetup): RivalManager {
     let best: Omit<RivalSub, 'step'> | null = null;
     let bestValue = 0;
     for (const [offSlot, off] of on.entries()) {
+      if (!mayComeOff(off)) continue;
       for (const [benchSlot, option] of setup.bench.entries()) {
         const value = subValue(off, option, left, lead, weight);
         if (value > bestValue) [best, bestValue] = [{ offSlot, benchSlot }, value];
