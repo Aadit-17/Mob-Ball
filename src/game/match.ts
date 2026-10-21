@@ -1,4 +1,12 @@
 import type { Look } from '../knight/look';
+import {
+  knockbackOf,
+  NO_ATTRIBUTES,
+  shotFactor,
+  strengthFactor,
+  stunOf,
+  type Attributes,
+} from './attributes';
 import { BALL, BUILDS, KNIGHT, MATCH, PITCH, POST, STEP } from './constants';
 import { kickoffSpot } from './formation';
 import { capSpeed, collide, stepBall, stepKnight } from './physics';
@@ -20,6 +28,8 @@ export interface KnightSpec {
   readonly human: boolean;
   readonly tier: number;
   readonly speedFactor: number;
+  /** Trained stats on top of the build; absent means none, exactly as before attributes existed. */
+  readonly attributes?: Attributes;
 }
 
 export interface MatchConfig {
@@ -37,6 +47,7 @@ export const AIM_ASSIST = { range: 520, cone: 0.64, blend: 0.55, cornerInset: 30
 function makeKnight(spec: KnightSpec, team: TeamId, id: number, spot: { x: number; y: number }): Knight {
   const build = BUILDS[spec.look.build] ?? BUILDS[1];
   if (!build) throw new Error('No builds defined');
+  const attributes = spec.attributes ?? NO_ATTRIBUTES;
   return {
     id,
     team,
@@ -46,12 +57,13 @@ function makeKnight(spec: KnightSpec, team: TeamId, id: number, spot: { x: numbe
     human: spec.human,
     tier: spec.tier,
     speedFactor: spec.speedFactor,
+    attributes,
     x: spot.x,
     y: spot.y,
     vx: 0,
     vy: 0,
     radius: build.radius,
-    mass: build.mass,
+    mass: build.mass * strengthFactor(attributes),
     facing: team === 0 ? 1 : -1,
     kickHeld: false,
     kickCooldown: 0,
@@ -187,9 +199,10 @@ function resolveKnightContact(state: MatchState, a: Knight, b: Knight): void {
   const [attacker, victim] = a.bargeTime > 0 ? [a, b] : b.bargeTime > 0 ? [b, a] : [null, null];
   if (!attacker || victim.stun > 0) return;
   const d = Math.hypot(victim.x - attacker.x, victim.y - attacker.y) || 1;
-  victim.stun = KNIGHT.stunDuration;
-  victim.vx = ((victim.x - attacker.x) / d) * KNIGHT.knockback;
-  victim.vy = ((victim.y - attacker.y) / d) * KNIGHT.knockback;
+  victim.stun = stunOf(attacker.attributes, victim.attributes);
+  const knockback = knockbackOf(attacker.attributes, victim.attributes);
+  victim.vx = ((victim.x - attacker.x) / d) * knockback;
+  victim.vy = ((victim.y - attacker.y) / d) * knockback;
   attacker.bargeTime = 0;
   attacker.vx *= 0.2;
   attacker.vy *= 0.2;
@@ -258,10 +271,11 @@ function tryKick(state: MatchState, k: Knight, incoming: Incoming): void {
   const oneTouch = incoming.toucher !== k.id && incoming.speed >= KNIGHT.oneTouchMinSpeed;
   const boost =
     (isShotAtGoal(state, k.team, dir) ? KNIGHT.shotBoost : 1) * (oneTouch ? KNIGHT.oneTouchBoost : 1);
-  const power = KNIGHT.kickPower * k.build.kick * boost;
+  const shot = shotFactor(k.attributes);
+  const power = KNIGHT.kickPower * k.build.kick * shot * boost;
   state.ball.vx += dir.x * power;
   state.ball.vy += dir.y * power;
-  capSpeed(state.ball, BALL.maxSpeed * boost);
+  capSpeed(state.ball, BALL.maxSpeed * boost * shot);
   touchBall(state.ball, k);
   k.kickCooldown = KNIGHT.kickCooldown;
   state.events.push({ type: 'kick', x: state.ball.x, y: state.ball.y, knightId: k.id, boost });

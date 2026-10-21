@@ -1,4 +1,5 @@
 import type { Look } from '../knight/look';
+import type { Attributes } from './attributes';
 import type { BuildStats } from './constants';
 import type { Rng } from './rng';
 
@@ -37,6 +38,7 @@ export interface Knight extends Body {
   /** Bot skill tier (0 = Peasant … 4 = Legend). Humans carry the top tier for display only. */
   readonly tier: number;
   readonly speedFactor: number;
+  readonly attributes: Attributes;
   facing: 1 | -1;
   kickHeld: boolean;
   kickCooldown: number;

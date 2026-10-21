@@ -1,3 +1,4 @@
+import { bargeCooldownOf, paceFactor } from './attributes';
 import { BALL, KNIGHT, PITCH } from './constants';
 import type { Ball, Body, Input, Knight } from './types';
 import { clamp } from './vec';
@@ -44,7 +45,7 @@ export function stepKnight(k: Knight, input: Input, ball: Ball, dt: number): voi
     ix /= len;
     iy /= len;
   }
-  const speed = k.build.speed * k.speedFactor;
+  const speed = k.build.speed * k.speedFactor * paceFactor(k.attributes);
 
   if (k.bargeTime > 0) {
     k.bargeTime = Math.max(0, k.bargeTime - dt);
@@ -68,7 +69,7 @@ export function stepKnight(k: Knight, input: Input, ball: Ball, dt: number): voi
     k.bargeDirX = dx / d;
     k.bargeDirY = dy / d;
     k.bargeTime = KNIGHT.bargeDuration;
-    k.bargeCooldown = KNIGHT.bargeCooldown;
+    k.bargeCooldown = bargeCooldownOf(k.attributes);
   }
 
   k.kickHeld = input.kick && !stunned;

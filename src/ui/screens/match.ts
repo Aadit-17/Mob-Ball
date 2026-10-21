@@ -1,7 +1,8 @@
 import type { AppContext } from '../../app';
 import { muteButton } from '../../audio/mute-button';
 import { sound } from '../../audio/sound';
-import { KNIGHT, MATCH, STEP } from '../../game/constants';
+import { bargeCooldownOf } from '../../game/attributes';
+import { MATCH, STEP } from '../../game/constants';
 import { knightById } from '../../game/match';
 import { randomSeed } from '../../game/rng';
 import type { Input, Knight, MatchEvent, MatchState, Role, TeamId } from '../../game/types';
@@ -623,7 +624,10 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       score.textContent = `${state.score[0]} – ${state.score[1]}`;
       clock.textContent = state.goldenGoal ? 'GOLDEN' : formatClock(state.clock);
       // On the section, so the touch Barge button's ring reads it too.
-      section.style.setProperty('--p', String(1 - (human?.bargeCooldown ?? 0) / KNIGHT.bargeCooldown));
+      section.style.setProperty(
+        '--p',
+        String(1 - (human ? human.bargeCooldown / bargeCooldownOf(human.attributes) : 0)),
+      );
     }
     renderer.draw({
       state,
