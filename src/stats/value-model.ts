@@ -88,8 +88,9 @@ export const RATING_MODEL: RatingModel = {
     mid: { mean: 0.7285, sd: 0.7133 },
     fwd: { mean: 0.8676, sd: 0.8696 },
   },
-  lift: 0.45,
-  spread: 0.4406,
-  outcome: { goal: 0.7622, assist: 0.3811, ownGoal: 0.7622, save: 0.5445, cleanSheet: 0.4825 },
+  lift: 0.6,
+  spread: 0.5875,
+  outcome: { goal: 0.2696, assist: 0.1348, ownGoal: 0.2696, save: 0.6713, cleanSheet: 0.1653 },
   motmMargin: 0.5,
+  possession: { shot: [0.3147, 0.3197, 0.1788, 0.0622, 0.0438, 0.0403], weight: 0.1984 },
 };

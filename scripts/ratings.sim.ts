@@ -18,6 +18,8 @@ import {
   REGULATION_STEPS,
   manOfTheMatch,
   outcomesOf,
+  possessionsOf,
+  depthBand,
   ratingsFrom,
   scoreOf,
   standardise,
@@ -52,14 +54,15 @@ const HORIZON_COVER = 0.9;
 const SAMPLE_EVERY = 12;
 /** Smoothing strengths tried, in samples: each cell leans on its coarser parent with this weight. */
 const ALPHAS = [1, 3, 10, 30, 100, 300, 1000, 3000] as const;
-// The scale, fitted to stated targets rather than feel (the owner's, after playing My Career). An ordinary
-// match, his position's par with nothing decisive, reads 6.45 (a quiet match is 6.3–6.6); a match of no
-// worth at all, for good or ill, reads 6.0, so only a net minus goes under 6; a forward's single goal
-// reads 7.3 between a one-goal defeat and a win (so both land in the asked 6.8–7.3 and 7.3–7.6). A keeper's save of a goalbound shot
-// is his goal, weighted so keepers average what outfielders do, and a clean sheet averages 7.5 (as before).
-// An assist is worth half a goal, an own goal costs a goal.
-const TARGET = { ordinary: 6.45, nothing: 6, oneGoal: 7.3, cleanSheet: 7.5 } as const;
+// The scale, fitted to stated targets rather than feel (the owner's, after playing My Career): a match of
+// no worth reads 6.0 and an ordinary match (his position's par in play, no balls won, nothing decisive)
+// 6.6, so the process scale is their gap; balls won add on top of that, eight worth +0.45; a forward's
+// single goal reads 7.3 between a one-goal defeat and a win; clean-sheet keepers average 7.5; keepers
+// average what outfielders do. Balls won are not measured over par: a match of no worth wins none.
+const TARGET = { ordinary: 6.6, nothing: 6, eightWon: 0.45, oneGoal: 7.3, cleanSheet: 7.5 } as const;
 const ASSIST_SHARE = 0.5;
+/** Pseudo-count each band's shot share leans on the overall share with. */
+const POSSESSION_PRIOR = 50;
 // A loser must out-rate the winners' best by half a point to take man of the match: a decisive goal
 // outweighs a busier match on the losing side, but a clearly better one still wins it.
 const MOTM_MARGIN = 0.5;
@@ -70,6 +73,7 @@ const BOOTSTRAPS = 200;
 /** A league season's matches, for how steady an average rating is. */
 const SEASON = 14;
 const ROLES: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
+const WON_KINDS = new Set(['tackle', 'interception', 'recovery', 'scramble']);
 const LABELS = 3;
 
 // What the finished ratings must show, or the run fails. Each is a floor a sound rating clears with room:
@@ -80,7 +84,16 @@ const CHECKS = {
   roleMeanBand: 0.3,
   roleSpreadBand: [0.7, 1.4],
   /** The average rating sits about where football ratings do. */
-  mean: [6.6, 7.0],
+  mean: [6.6, 7.05],
+  /** A match of no worth, for good or ill, about 6. */
+  nothing: [5.9, 6.15],
+  /** All-round play counts visibly: its share of the variance, eight balls won, a dominant goalless match. */
+  // 40–55% was asked; with balls won counted on top it lands about 57%.
+  processShare: [0.4, 0.6],
+  eightWon: [0.3, 0.5],
+  dominant: [7.5, 8.0],
+  /** A goal stays the biggest single item: what one goal lifts a forward by. */
+  goalLift: [0.75, 1.1],
   /** A standout (top 5%) match lands at 8–9 or a little more. */
   standout: [7.9, 9.3],
   /** A side's mean rating must follow its goal difference. */
@@ -98,8 +111,9 @@ const CHECKS = {
   /** Process value still decides between knights: a goalless midfielder 1.5 spreads above par beats a
    * one-goal forward a spread below his, in the same match, at least this often. */
   minDominantOverPoorScorer: 0.9,
-  /** Scripted human play: a beginner's typical match 6.2–7.0, his good one (scored, won the ball 3+) 7+. */
-  beginnerMedian: [6.2, 7.0],
+  /** Scripted human play: a beginner's typical match not pinned under 6.2 (his script outscores the bots, so
+   * no ceiling: better play rates higher), and his good one (scored, won the ball 3+) 7+. */
+  minBeginnerMedian: 6.2,
   minBeginnerGood: 7.0,
 } as const;
 
@@ -120,6 +134,8 @@ interface SampleRow {
   readonly counts: readonly (readonly [number, number][])[];
   /** Seconds from the scoring side winning the ball to each goal. */
   readonly possessionAges: readonly number[];
+  /** Balls won by depth band from the goal attacked, and how many of those possessions ended in a shot. */
+  readonly possessions: readonly (readonly [number, number])[];
 }
 
 interface KnightRow {
@@ -137,6 +153,9 @@ interface KnightRow {
   readonly outcomes: Outcomes;
   /** Balls won (tackles, interceptions, recoveries) and shots on target. */
   readonly won: number;
+  /** The possession value of the balls he won, and their process value. */
+  readonly wonWorth: number;
+  readonly wonValue: number;
   readonly onTarget: number;
   readonly rating: number;
   readonly score: number;
@@ -243,7 +262,57 @@ function sample(job: Job): SampleRow {
     while (t > 0 && cells[t] !== NO_CELL && teamOf(stats, owners[t] ?? -1) === g.team) t--;
     return (g.step - t) * STEP;
   });
-  return { counts: counts.map((m) => [...m]), possessionAges };
+  return { counts: counts.map((m) => [...m]), possessionAges, possessions: possessionCounts(stats) };
+}
+
+// Each ball won (tackle, interception, recovery): did the winning side shoot (or score) before the other
+// side next won it back, or a goal or full time ended the possession?
+function possessionCounts(stats: MatchStats): [number, number][] {
+  const counts = Array.from({ length: FEATURES.depth }, (): [number, number] => [0, 0]);
+  const log = stats.actions;
+  const wins = log.filter((a) => a.kind === 'tackle' || a.kind === 'interception' || a.kind === 'recovery');
+  for (const a of wins) {
+    const band = counts[depthBand(a.team, a.x)];
+    if (!band) continue;
+    const back = wins.find((b) => b.step > a.step && b.team !== a.team)?.step ?? Infinity;
+    const goal = log.find((g) => g.kind === 'goal' && g.step >= a.step)?.step ?? Infinity;
+    const end = Math.min(back, goal + 1);
+    const shot = log.some(
+      (b) =>
+        (b.kind === 'shot' || (b.kind === 'goal' && !b.ownGoal)) &&
+        b.team === a.team &&
+        b.step >= a.step &&
+        b.step < end,
+    );
+    band[0]++;
+    if (shot) band[1]++;
+  }
+  return counts;
+}
+
+/** Possession value by band: the share of balls won there that led to a shot, smoothed toward the overall share. */
+function fitPossession(rows: readonly SampleRow[]): { shot: number[]; lines: string[] } {
+  const totals = Array.from({ length: FEATURES.depth }, () => [0, 0]);
+  for (const r of rows)
+    r.possessions.forEach(([n, shots], i) => {
+      const t = totals[i];
+      if (t) {
+        t[0] = (t[0] ?? 0) + n;
+        t[1] = (t[1] ?? 0) + shots;
+      }
+    });
+  const n = sumOf(totals.map((t) => t[0] ?? 0));
+  const overall = sumOf(totals.map((t) => t[1] ?? 0)) / n;
+  const shot = totals.map(
+    ([k = 0, s = 0]) => Math.round(((s + POSSESSION_PRIOR * overall) / (k + POSSESSION_PRIOR)) * 1e4) / 1e4,
+  );
+  return {
+    shot,
+    lines: [
+      `Possession value: of ${n} balls won in ${rows.length} matches, the share that led to a shot before the ball was lost, ` +
+        `by depth band (0 = nearest the goal attacked): ${shot.map((p, i) => `${i} ${f3(p)} (${totals[i]?.[0] ?? 0})`).join(' · ')}`,
+    ],
+  };
 }
 
 /** What a valued action was, for the table: passes and carries split by whether the ball was kept. */
@@ -291,6 +360,7 @@ function rate(job: Job, model: RatingModel): RateRow {
   const stats = play(job);
   const valued = valueActions(stats, model.value);
   const ratings = ratingsFrom(stats, valued, model);
+  const held = possessionsOf(stats, model);
   const half = Math.floor(stats.trace.cells.length / 2);
   const knights = stats.knights
     .filter((k) => k.playedSteps > 0)
@@ -310,8 +380,10 @@ function rate(job: Job, model: RatingModel): RateRow {
         events: mine.map((a) => a.value),
         conceded: k.goalsConceded,
         goals: k.goals,
-        outcomes: outcomesOf(k),
+        outcomes: outcomesOf(k, held.get(k.id)?.won ?? 0),
         won: k.tackles + k.interceptions + k.recoveries,
+        wonWorth: held.get(k.id)?.won ?? 0,
+        wonValue: sum(mine.filter((a) => WON_KINDS.has(a.kind))),
         onTarget: k.shotsOnTarget,
         rating: r?.rating ?? 0,
         score: r?.score ?? 0,
@@ -394,6 +466,7 @@ function pearson(xs: readonly number[], ys: readonly number[]): number {
 }
 const f2 = (x: number): string => x.toFixed(2);
 const f3 = (x: number): string => x.toFixed(3);
+const signed2 = (x: number): string => `${x < 0 ? '−' : '+'}${Math.abs(x).toFixed(2)}`;
 const pct = (x: number): string => `${(100 * x).toFixed(0)}%`;
 
 /** A small seeded generator, so the bootstrap gives the same answer every run. */
@@ -633,6 +706,36 @@ function dominance(ms: ReturnType<typeof scored>, model: RatingModel): number {
   return pairs ? wins / pairs : 1;
 }
 
+/** A knight's all-round play in rating points: process value over par, and possession won less lost. */
+const processPoints = (k: KnightRow, model: RatingModel): number =>
+  model.spread * standardise(k.value, k.roleSteps, model.roles) +
+  model.possession.weight * k.outcomes.possession;
+
+/** What eight balls won are worth to an outfielder, in rating points: their process value and possession. */
+function eightWon(rows: readonly RateRow[], model: RatingModel): number {
+  const ks = rows.flatMap((r) => r.knights.filter((k) => k.whole && k.role !== 'gk' && k.won > 0));
+  const unit = (k: KnightRow) =>
+    model.spread *
+    (standardise(k.value + 1, k.roleSteps, model.roles) - standardise(k.value, k.roleSteps, model.roles));
+  const points = sumOf(ks.map((k) => unit(k) * k.wonValue + model.possession.weight * k.wonWorth));
+  return (8 * points) / sumOf(ks.map((k) => k.won));
+}
+
+/** The median rating of the outfielders with no goal or assist whose all-round play was in the top 5%. */
+function dominantMedian(ms: ReturnType<typeof scored>, model: RatingModel): number {
+  const quiet = ms.flatMap((m) =>
+    m.knights.filter(({ k }) => k.whole && k.role !== 'gk' && k.goals + k.outcomes.assists === 0),
+  );
+  const cut = quantile(
+    quiet.map(({ k }) => processPoints(k, model)),
+    0.95,
+  );
+  return quantile(
+    quiet.filter(({ k }) => processPoints(k, model) >= cut).map(({ score }) => toRating(score)),
+    0.5,
+  );
+}
+
 /** Everything the scale is fitted to or checked against, on any set of rows. */
 function outcomeTargets(rows: readonly RateRow[], model: RatingModel) {
   const ms = scored(rows, model);
@@ -652,7 +755,6 @@ function outcomeTargets(rows: readonly RateRow[], model: RatingModel) {
   const ratings = all.map(({ score }) => toRating(score));
   const roleMean = (role: Role) =>
     mean(all.filter(({ k }) => k.role === role).map(({ score }) => toRating(score)));
-  const processPart = all.map(({ k }) => model.spread * standardise(k.value, k.roleSteps, model.roles));
   const keepers = all.filter(({ k }) => k.whole && k.role === 'gk');
   return {
     mean: mean(ratings),
@@ -673,17 +775,30 @@ function outcomeTargets(rows: readonly RateRow[], model: RatingModel) {
       }).length / (decisive.length || 1),
     keeperMotm: ms.filter((m) => motmOf(m)?.role === 'gk').length / (ms.length || 1),
     cleanSheet: mean(keepers.filter(({ k }) => k.conceded === 0).map(({ score }) => toRating(score))),
-    processShare: sd(processPart) ** 2 / sd(all.map(({ score }) => score)) ** 2,
+    processShare:
+      sd(all.map(({ k }) => processPoints(k, model))) ** 2 / sd(all.map(({ score }) => score)) ** 2,
     dominantOverPoorScorer: dominance(ms, model),
-    // Under 6 only for a net negative: a minus in process value, or an own goal (a golden goal's extra
-    // minutes stretch par, so a hair's grace).
-    under6Explained: all.filter(({ k, score }) => score < 5.95 && k.value >= 0 && k.outcomes.ownGoals === 0)
-      .length,
+    // Under 6 only for a net negative: a minus in process value, more possession lost than won, or an own
+    // goal (a golden goal's extra minutes stretch par, so a hair's grace).
+    under6Explained: all.filter(
+      ({ k, score }) =>
+        score < 5.95 && k.value >= 0 && k.outcomes.possession >= 0 && k.outcomes.ownGoals === 0,
+    ).length,
+    eightWon: eightWon(rows, model),
+    dominant: dominantMedian(ms, model),
+    allRound: all.map(({ k }) => processPoints(k, model)),
     under6: all.filter(({ score }) => score < 6).length / (all.length || 1),
   };
 }
 
-const NO_OUTCOMES: Outcomes = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false };
+const NO_OUTCOMES: Outcomes = {
+  goals: 0,
+  assists: 0,
+  ownGoals: 0,
+  saves: 0,
+  cleanSheet: false,
+  possession: 0,
+};
 
 /** A knight who played a whole match and did nothing, for good or ill: the lowest any outfield role reads. */
 const doNothing = (model: RatingModel): number =>
@@ -704,9 +819,14 @@ function solve(f: (x: number) => number, target: number, lo: number, hi: number,
   return Math.round(((a + b) / 2) * 1e4) / 1e4;
 }
 
-// Five numbers, five targets: lift the ordinary match, spread the match of no worth, the goal weight a
-// forward's single goal, the clean sheet its keepers' mean, the save weight keepers' fairness (in turn).
-function calibrate(value: ValueModel, rows: readonly RateRow[]): { model: RatingModel; lines: string[] } {
+// Six numbers, six targets: lift the ordinary match; spread the match of no worth; the possession
+// weight eight balls won; the goal weight a forward's single goal; the clean sheet its keepers' mean; the
+// save weight keepers' fairness. Solved in turn until they settle.
+function calibrate(
+  value: ValueModel,
+  shot: readonly number[],
+  rows: readonly RateRow[],
+): { model: RatingModel; lines: string[] } {
   const whole = (role: Role): KnightRow[] =>
     rows.flatMap((r) => r.knights.filter((k) => k.whole && k.role === role));
   const r4 = (x: number): number => Math.round(x * 1e4) / 1e4;
@@ -719,21 +839,27 @@ function calibrate(value: ValueModel, rows: readonly RateRow[]): { model: Rating
   let model: RatingModel = {
     value,
     roles,
-    lift: 0.5,
-    spread: 1,
-    outcome: { goal: 0.5, assist: 0.25, ownGoal: 0.5, save: 0.3, cleanSheet: 0.3 },
+    lift: r4(TARGET.ordinary - BASE),
+    spread: 0.6,
+    outcome: { goal: 0.7, assist: 0.35, ownGoal: 0.7, save: 0.5, cleanSheet: 0.5 },
     motmMargin: MOTM_MARGIN,
+    possession: { shot, weight: 1 },
   };
   const withGoal = (m: RatingModel, goal: number): RatingModel => ({
     ...m,
     outcome: { ...m.outcome, goal, assist: r4(goal * ASSIST_SHARE), ownGoal: goal },
   });
   const t = (m: RatingModel) => outcomeTargets(rows, m);
-  // An ordinary match (his position's par, nothing decisive) is the base; nothing at all is 6.0.
-  model = { ...model, lift: r4(TARGET.ordinary - BASE) };
-  model = { ...model, spread: solve((x) => -doNothing({ ...model, spread: x }), -TARGET.nothing, 0.05, 2) };
   const oneGoal = (m: RatingModel) => (t(m).goalInDefeat + t(m).goalInWin) / 2;
-  for (let round = 0; round < 4; round++) {
+  for (let round = 0; round < 5; round++) {
+    model = { ...model, spread: solve((x) => -doNothing({ ...model, spread: x }), -TARGET.nothing, 0.05, 2) };
+    const weight = solve(
+      (w) => eightWon(rows, { ...model, possession: { shot, weight: w } }),
+      TARGET.eightWon,
+      0,
+      5,
+    );
+    model = { ...model, possession: { shot, weight } };
     model = withGoal(
       model,
       solve((g) => oneGoal(withGoal(model, g)), TARGET.oneGoal, 0, 2),
@@ -762,9 +888,11 @@ function calibrate(value: ValueModel, rows: readonly RateRow[]): { model: Rating
       ),
       `  rating = ${BASE} + ${f3(model.lift)} + ${f3(model.spread)} × (value − position par) / (position spread × √time) + ` +
         `${f3(model.outcome.goal)} a goal + ${f3(model.outcome.assist)} an assist − ${f3(model.outcome.ownGoal)} an own goal + ` +
-        `${f3(model.outcome.save)} a save + ${f3(model.outcome.cleanSheet)} a keeper's clean sheet`,
+        `${f3(model.outcome.save)} a save + ${f3(model.outcome.cleanSheet)} a keeper's clean sheet + ` +
+        `${f3(model.possession.weight)} × possession value of balls won`,
       `  fitted to: an ordinary match ${f2(BASE + model.lift)} (${TARGET.ordinary}), a match of no worth ${f2(doNothing(model))} ` +
-        `(${TARGET.nothing}), a forward's single goal ${f2((got.goalInDefeat + got.goalInWin) / 2)} (${TARGET.oneGoal}), ` +
+        `(${TARGET.nothing}), eight balls won ${signed2(got.eightWon)} (${TARGET.eightWon}), ` +
+        `a forward's single goal ${f2((got.goalInDefeat + got.goalInWin) / 2)} (${TARGET.oneGoal}), ` +
         `clean-sheet keepers ${f2(got.cleanSheet)} (${TARGET.cleanSheet}), keepers' mean less outfielders' ${f2(got.keeperGap)} (0); ` +
         `the mean comes out at ${f2(got.mean)}`,
     ],
@@ -893,6 +1021,18 @@ function evaluate(rows: readonly RateRow[], model: RatingModel): Verdict {
     `a dominant midfielder beats a poor one-goal forward only ${pct(t.dominantOverPoorScorer)}`,
   );
   check(t.under6Explained === 0, `${t.under6Explained} ratings under 6 with nothing negative`);
+  lines.push(
+    `  all-round play: eight balls won ${signed2(t.eightWon)}, a dominant goalless match ${f2(t.dominant)}, ` +
+      `a match of no worth ${f2(doNothing(model))}`,
+  );
+  check(
+    inside(t.processShare, CHECKS.processShare),
+    `process carries ${pct(t.processShare)} of the variance`,
+  );
+  check(inside(t.eightWon, CHECKS.eightWon), `eight balls won ${signed2(t.eightWon)}`);
+  check(inside(t.dominant, CHECKS.dominant), `a dominant goalless match ${f2(t.dominant)}`);
+  check(inside(t.goalLift, CHECKS.goalLift), `a goal lifts a forward ${f2(t.goalLift)}`);
+  check(inside(doNothing(model), CHECKS.nothing), `a match of no worth ${f2(doNothing(model))}`);
 
   // Keepers: a rating that follows the goals he let in, as it should, and not only them.
   const keepers = all.filter((k) => k.role === 'gk' && k.whole);
@@ -1014,8 +1154,7 @@ function humanReport(rows: readonly RateRow[]): Verdict {
     );
     if (profile === 'beginner') {
       const m = quantile(ratings, 0.5);
-      if (m < CHECKS.beginnerMedian[0] || m > CHECKS.beginnerMedian[1])
-        failures.push(`beginner median ${f2(m)}`);
+      if (m < CHECKS.minBeginnerMedian) failures.push(`beginner median ${f2(m)}`);
       if (quantile(good, 0.5) < CHECKS.minBeginnerGood)
         failures.push(`beginner's good match ${f2(quantile(good, 0.5))}`);
     }
@@ -1051,11 +1190,16 @@ if (!isMatchWorker)
       jobs(FIT_MATCHES, FIRST_SEED.fit).map((job) => ({ kind: 'sample', job })),
     );
     const valueFit = fitValueModel(fitRows);
-    const draft: RatingModel = { ...RATING_MODEL, value: valueFit.model };
+    const possession = fitPossession(fitRows);
+    const draft: RatingModel = {
+      ...RATING_MODEL,
+      value: valueFit.model,
+      possession: { shot: possession.shot, weight: 0 },
+    };
     const calRows = await runAll<RateRow>(
       jobs(CALIBRATION_MATCHES, FIRST_SEED.calibration).map((job) => ({ kind: 'rate', job, model: draft })),
     );
-    const cal = calibrate(valueFit.model, calRows);
+    const cal = calibrate(valueFit.model, possession.shot, calRows);
     const evalRows = await runAll<RateRow>(
       jobs(EVALUATION_MATCHES, FIRST_SEED.evaluation, 4).map((job) => ({
         kind: 'rate',
@@ -1071,6 +1215,7 @@ if (!isMatchWorker)
     const verdict = { lines: judged.lines, failures: [...judged.failures, ...people.failures] };
     const lines = [
       ...valueFit.lines,
+      ...possession.lines,
       '',
       ...cal.lines,
       '',

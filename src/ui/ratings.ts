@@ -23,16 +23,31 @@ const signed = (x: number): string => {
 };
 const round1 = (x: number): number => Math.round(x * 10) / 10;
 
-/** A breakdown as shown: each part to one decimal, the rounding left over said out loud, then any cap. */
+/** What decided the match comes first in a breakdown; the rest follow, biggest first. */
+const DECISIVE = ['Goals', 'Assists', 'Own goals', 'Saves', 'Clean sheet', 'Goals conceded'];
+
+// A breakdown as shown: each part to one decimal, decisive parts first, then the rest by size. Parts that
+// would read 0.0 fold into "Other play"; any rounding left over is said out loud, then any cap, so the
+// parts shown always add up to the rating shown.
 export function breakdownParts(b: RatingBreakdown): { label: string; value: string }[] {
+  const rank = (label: string): number => {
+    const i = DECISIVE.indexOf(label);
+    return i === -1 ? DECISIVE.length : i;
+  };
+  const lines = [...b.lines].sort(
+    (x, y) => rank(x.label) - rank(y.label) || Math.abs(y.points) - Math.abs(x.points),
+  );
+  const shown = lines.filter((l) => round1(l.points) !== 0);
+  const other = lines.filter((l) => round1(l.points) === 0).reduce((sum, l) => sum + l.points, 0);
   const parts = [
     { label: 'Base', value: b.base.toFixed(1), shown: round1(b.base) },
-    ...b.lines.map((l) => ({
+    ...shown.map((l) => ({
       label: l.count ? `${l.label} ${l.count}` : l.label,
       value: signed(l.points),
       shown: round1(l.points),
     })),
   ];
+  if (round1(other) !== 0) parts.push({ label: 'Other play', value: signed(other), shown: round1(other) });
   const rest = round1(round1(b.score) - parts.reduce((sum, p) => sum + p.shown, 0));
   if (rest !== 0) parts.push({ label: 'Rounding', value: signed(rest), shown: rest });
   const cap = round1(round1(b.rating) - round1(b.score));

@@ -1764,7 +1764,12 @@ main:has(> .match.touch) {
   font-size: 15px;
 }
 
-/* Full time: the scorers and ratings scroll on a short screen, so the buttons always stay in view. */
+/* Full time: the scorers and ratings scroll on a short screen, so the buttons always stay in view. The
+   overlay's one row is its full height, so the card's max-height has a height to be a share of. */
+.overlay:has(.ratings) {
+  grid-template-rows: minmax(0, 100%);
+}
+
 .overlay-card:has(.ratings) {
   display: flex;
   flex-direction: column;
@@ -1990,6 +1995,12 @@ main:has(> .match.touch) {
 
 /* Short landscape screens: a wider card, a smaller verdict and the scorers on a line leave the ratings room. */
 @media (max-height: 480px) {
+  /* The pitch is taller than the window here, so the full-time card covers the window instead. */
+  .overlay:has(.ratings) {
+    position: fixed;
+    z-index: 10;
+  }
+
   .overlay-card:has(.ratings) {
     width: min(96%, 760px);
     padding-bottom: 12px;

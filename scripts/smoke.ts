@@ -30,6 +30,38 @@ async function heapMb(page: Page): Promise<string> {
   return (usedSize / 1048576).toFixed(1);
 }
 
+/** Every full-time button whole on screen and on top, at each window size, with every rating opened. */
+async function expectResultActionsInView(page: Page): Promise<void> {
+  const before = page.viewportSize();
+  await page.locator('.rt-open[aria-expanded="false"]').evaluateAll((buttons) => {
+    for (const b of buttons) if (b instanceof HTMLElement) b.click();
+  });
+  if (await page.locator('.rt-open[aria-expanded="false"]').count())
+    throw new Error('A rating breakdown did not open');
+  for (const [width, height] of [
+    [1280, 900],
+    [1280, 720],
+    [844, 390],
+    [390, 844],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(200);
+    const hidden = await page.locator('.overlay-actions button').evaluateAll((buttons) =>
+      buttons
+        .filter((b) => {
+          const r = b.getBoundingClientRect();
+          const onTop = document.elementFromPoint((r.left + r.right) / 2, r.bottom - 2);
+          const inside = r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth;
+          return !inside || !onTop || !(onTop === b || b.contains(onTop));
+        })
+        .map((b) => b.textContent),
+    );
+    if (hidden.length)
+      throw new Error(`At ${width}×${height} full-time buttons are cut off: ${hidden.join(', ')}`);
+  }
+  if (before) await page.setViewportSize(before);
+}
+
 async function expectPressed(button: Locator, expected: string, failure: string): Promise<void> {
   const actual = await button.getAttribute('aria-pressed');
   if (actual !== expected) throw new Error(`${failure} (aria-pressed=${actual ?? 'missing'})`);
@@ -388,6 +420,8 @@ async function main(): Promise<void> {
       await page.keyboard.up(' ');
     }
     console.log(`full time: ${await page.locator('.final').textContent()} · heap ${await heapMb(page)} MB`);
+    await expectResultActionsInView(page);
+    console.log('full-time buttons whole on screen at 1280×900, 1280×720, 844×390 and 390×844');
 
     await page.getByRole('button', { name: /Rematch/ }).click();
     await page.waitForSelector('.overlay[hidden]', { state: 'attached' });

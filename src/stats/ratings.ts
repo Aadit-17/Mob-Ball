@@ -1,12 +1,12 @@
 // Match ratings in two parts. Process: every action is worth the change it made in how likely each side
 // was to score next (the fitted value model), against what his position usually earns in that time.
 // Outcome: goals, assists, own goals, saves and clean sheets, counted in full, on top. Pure, replayable.
-import { MATCH, STEP } from '../game/constants';
+import { MATCH, PITCH, STEP } from '../game/constants';
 import type { Role, TeamId } from '../game/types';
 import { POSSESSION_HOLD, rivalOf } from './definitions';
 import { mainRole } from './tally';
 import type { Action, KnightStats, MatchStats } from './types';
-import { NO_CELL, type ValueModel } from './value';
+import { DEPTH_BAND, DEPTHS, NO_CELL, type ValueModel } from './value';
 import { RATING_MODEL } from './value-model';
 
 export type ValueKind =
@@ -67,6 +67,16 @@ export interface RatingModel {
   readonly outcome: OutcomeWeights;
   /** A losing side's knight is man of the match only if he out-rates the winners' best by this much. */
   readonly motmMargin: number;
+  readonly possession: PossessionModel;
+}
+
+// Winning the ball is worth more than the next few seconds' goal chance shows: it gives your side the ball.
+// A ball won earns the winner how often a possession won in that band ends in a shot (fitted), at `weight`
+// rating points a unit. The loser isn't charged again: his share of the swing is already in his value.
+export interface PossessionModel {
+  /** P(the side that won the ball shoots before losing it), by depth band from the goal it attacks. */
+  readonly shot: readonly number[];
+  readonly weight: number;
 }
 
 /** The decisive things a knight did, as the stats count them. */
@@ -77,6 +87,8 @@ export interface Outcomes {
   readonly saves: number;
   /** Kept goal and let nothing in while there. */
   readonly cleanSheet: boolean;
+  /** The possession value of the balls he won (see PossessionModel). */
+  readonly possession: number;
 }
 
 export interface KnightRating {
@@ -321,19 +333,58 @@ function yardstick(roleSteps: KnightStats['roleSteps'], roles: Readonly<Record<R
 
 export const toRating = (score: number): number => Math.min(MAX_RATING, Math.max(MIN_RATING, score));
 
-export const outcomesOf = (k: KnightStats): Outcomes => ({
+export const outcomesOf = (k: KnightStats, possession = 0): Outcomes => ({
   goals: k.goals,
   assists: k.assists,
   ownGoals: k.ownGoals,
   saves: k.saves,
   cleanSheet: k.roleSteps.gk > 0 && k.goalsConceded === 0,
+  possession,
 });
+
+/** The depth band, from the goal a side attacks, of a point on the pitch (as the value model bands it). */
+export const depthBand = (team: TeamId, x: number): number => {
+  const ahead = team === 0 ? PITCH.right - x : x - PITCH.left;
+  return Math.min(DEPTHS - 1, Math.max(0, Math.floor(ahead / DEPTH_BAND)));
+};
+
+/** Each knight's possessions won and lost, valued by the possession model: [won, lost, balls won, balls lost]. */
+export function possessionsOf(
+  stats: MatchStats,
+  model: RatingModel = RATING_MODEL,
+): Map<number, PossessionLine> {
+  const lines = new Map<number, PossessionLine>();
+  const line = (id: number): PossessionLine => {
+    const l = lines.get(id) ?? { won: 0, lost: 0, wins: 0, losses: 0 };
+    lines.set(id, l);
+    return l;
+  };
+  for (const a of stats.actions) {
+    if (a.kind !== 'tackle' && a.kind !== 'interception' && a.kind !== 'recovery') continue;
+    const worth = model.possession.shot[depthBand(a.team, a.x)] ?? 0;
+    const winner = line(a.knightId);
+    winner.won += worth;
+    winner.wins++;
+    const loser = line(a.fromId);
+    loser.lost += worth;
+    loser.losses++;
+  }
+  return lines;
+}
+
+export interface PossessionLine {
+  won: number;
+  lost: number;
+  wins: number;
+  losses: number;
+}
 
 /** Rating points for what decided the match: every goal (and every save) counts in full, whoever makes it. */
 export function outcomeCredit(o: Outcomes, roleSteps: KnightStats['roleSteps'], model: RatingModel): number {
   const w = model.outcome;
   const sheet = o.cleanSheet ? w.cleanSheet * Math.min(1, roleSteps.gk / REGULATION_STEPS) : 0;
-  return w.goal * o.goals + w.assist * o.assists - w.ownGoal * o.ownGoals + w.save * o.saves + sheet;
+  const held = model.possession.weight * o.possession;
+  return w.goal * o.goals + w.assist * o.assists - w.ownGoal * o.ownGoals + w.save * o.saves + sheet + held;
 }
 
 /** A rating before clamping, from summed action value, outcomes and time in each role. */
@@ -356,11 +407,13 @@ export function ratingsFrom(
 ): MatchRatings {
   const totals = new Map<number, number>();
   for (const a of actions) totals.set(a.knightId, (totals.get(a.knightId) ?? 0) + a.value);
+  const held = possessionsOf(stats, model);
   const knights = stats.knights
     .filter((k) => k.playedSteps > 0)
     .map((k): KnightRating => {
       const value = totals.get(k.id) ?? 0;
-      const outcomes = outcomesOf(k);
+      const p = held.get(k.id);
+      const outcomes = outcomesOf(k, p?.won ?? 0);
       const score = scoreOf(value, outcomes, k.roleSteps, model);
       const outcome = outcomeCredit(outcomes, k.roleSteps, model);
       return { id: k.id, team: k.team, role: mainRole(k), rating: toRating(score), score, value, outcome };
@@ -476,7 +529,8 @@ export function ratingBreakdown(
   const k = stats.knights.find((q) => q.id === knightId);
   if (!k || k.playedSteps === 0) return null;
   const unit = model.spread / yardstick(k.roleSteps, model.roles);
-  const o = outcomesOf(k);
+  const held = possessionsOf(stats, model).get(knightId) ?? { won: 0, lost: 0, wins: 0, losses: 0 };
+  const o = outcomesOf(k, held.won);
   const w = model.outcome;
   const points = new Map<Group, number>();
   const add = (g: Group, p: number): void => {
@@ -487,7 +541,12 @@ export function ratingBreakdown(
   if (o.assists) add('assists', w.assist * o.assists);
   if (o.ownGoals) add('ownGoals', -w.ownGoal * o.ownGoals);
   if (o.saves) add('saves', w.save * o.saves);
-  const sheet = outcomeCredit({ ...o, goals: 0, assists: 0, ownGoals: 0, saves: 0 }, k.roleSteps, model);
+  if (held.wins) add('won', model.possession.weight * held.won);
+  const sheet = outcomeCredit(
+    { ...o, goals: 0, assists: 0, ownGoals: 0, saves: 0, possession: 0 },
+    k.roleSteps,
+    model,
+  );
   if (sheet) add('cleanSheet', sheet);
   const lost = actions.filter((a) => a.knightId === knightId && a.kind === 'loss').length;
   const counts: Readonly<Record<Group, string>> = {

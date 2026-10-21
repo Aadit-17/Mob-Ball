@@ -21,6 +21,7 @@ import {
   REGULATION_STEPS,
   manOfTheMatch,
   outcomeCredit,
+  possessionsOf,
   rateMatch,
   ratingBreakdown,
   ratingsFrom,
@@ -442,13 +443,14 @@ describe('the rating scale', () => {
 describe('outcome credit', () => {
   const { outcome } = RATING_MODEL;
   const full = REGULATION_STEPS;
-  const none = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false };
+  const none = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false, possession: 0 };
   const fwd = steps({ fwd: full });
   const gk = steps({ gk: full });
 
   it('is calibrated to give a goal real weight, an assist half of it, an own goal the same cost, a save weight', () => {
-    // The harness fits the goal so a forward's single goal reads 7.3; it comes to about three quarters of a point.
-    expect(outcome.goal).toBeGreaterThan(0.5);
+    // The harness fits the goal so a forward's single goal reads 7.3; with its process value a goal lifts a
+    // forward about 0.75 in all, the outcome weight about a third of it.
+    expect(outcome.goal).toBeGreaterThan(0.2);
     expect(outcome.goal).toBeLessThan(1);
     expect(outcome.assist).toBeCloseTo(outcome.goal / 2, 3);
     expect(outcome.ownGoal).toBe(outcome.goal);
@@ -491,21 +493,22 @@ describe('outcome credit', () => {
     );
   });
 
-  it("reads an ordinary match (his position's par, nothing decisive) 6.45, and a match of no worth about 6.0", () => {
+  it("reads an ordinary match (his position's par, nothing decisive) 6.6, and a match of no worth about 6.0", () => {
     const { roles } = RATING_MODEL;
     for (const role of ['def', 'mid', 'fwd'] as const) {
       const whole = steps({ [role]: full });
-      expect(scoreOf(roles[role].mean, none, whole, RATING_MODEL)).toBeCloseTo(6.45, 6);
+      expect(scoreOf(roles[role].mean, none, whole, RATING_MODEL)).toBeCloseTo(6.6, 6);
       const nothing = scoreOf(0, none, whole, RATING_MODEL);
       expect(nothing).toBeGreaterThanOrEqual(6 - 1e-3);
       expect(nothing).toBeLessThan(6.1);
     }
   });
 
-  it('a forward who does a little worse than par and scores still reads 7 or so; a dominant midfielder still beats him', () => {
+  it('a forward at par who scores reads about 7.3; a dominant midfielder still beats a poor one who scores', () => {
     const { roles } = RATING_MODEL;
-    const scorer = scoreOf(roles.fwd.mean - 0.5 * roles.fwd.sd, { ...none, goals: 1 }, fwd, RATING_MODEL);
-    expect(scorer).toBeGreaterThan(6.8);
+    // His goal's own process value is about 0.6 (the table of action values in npm run ratings).
+    const scorer = scoreOf(roles.fwd.mean + 0.6, { ...none, goals: 1 }, fwd, RATING_MODEL);
+    expect(scorer).toBeGreaterThan(7);
     expect(scorer).toBeLessThan(7.3);
     const poor = scoreOf(roles.fwd.mean - roles.fwd.sd, { ...none, goals: 1 }, fwd, RATING_MODEL);
     const dominant = scoreOf(roles.mid.mean + 1.5 * roles.mid.sd, none, steps({ mid: full }), RATING_MODEL);
@@ -578,7 +581,7 @@ describe('the rating breakdown', () => {
         // The base is a match of no worth for his roles and minutes: everything he did is in a line.
         const line = stats.knights.find((q) => q.id === k.id);
         if (!line) throw new Error('no line');
-        const nothing = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false };
+        const nothing = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false, possession: 0 };
         expect(b.base).toBeCloseTo(scoreOf(0, nothing, line.roleSteps, RATING_MODEL), 9);
       }
     }
@@ -603,6 +606,42 @@ describe('the rating breakdown', () => {
     expect(goals?.count).toBe(`×${scorer.goals}`);
     expect(goals?.points).toBeGreaterThan(RATING_MODEL.outcome.goal * scorer.goals);
     expect(ratingBreakdown(stats, 999)).toBeNull();
+  });
+});
+
+describe('possession value', () => {
+  const full = REGULATION_STEPS;
+  const none = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false, possession: 0 };
+  it('rises toward the goal attacked: a ball won high up leads to a shot more often than one won deep', () => {
+    const { shot } = RATING_MODEL.possession;
+    expect(shot).toHaveLength(6);
+    expect(Math.min(shot[0] ?? 0, shot[1] ?? 0)).toBeGreaterThan(
+      Math.max(shot[3] ?? 1, shot[4] ?? 1, shot[5] ?? 1),
+    );
+    expect(RATING_MODEL.possession.weight).toBeGreaterThan(0);
+  });
+
+  it("credits the winner with each ball's possession value, and never charges the loser twice", () => {
+    const unweighted = { ...RATING_MODEL, possession: { ...RATING_MODEL.possession, weight: 0 } };
+    for (const stats of REAL)
+      for (const [id, line] of possessionsOf(stats)) {
+        const lines = (m: typeof RATING_MODEL) => ratingBreakdown(stats, id, m)?.lines ?? [];
+        const points = (m: typeof RATING_MODEL, label: string) =>
+          lines(m).find((l) => l.label === label)?.points ?? 0;
+        expect(points(RATING_MODEL, 'Won the ball') - points(unweighted, 'Won the ball')).toBeCloseTo(
+          RATING_MODEL.possession.weight * line.won,
+          9,
+        );
+        expect(points(RATING_MODEL, 'Lost the ball')).toBeCloseTo(points(unweighted, 'Lost the ball'), 9);
+      }
+  });
+
+  it('lifts a knight for every ball he wins, more the higher up he wins it', () => {
+    const at = (possession: number) =>
+      scoreOf(0.5, { ...none, possession }, steps({ mid: full }), RATING_MODEL);
+    const { shot } = RATING_MODEL.possession;
+    expect(at(8 * (shot[1] ?? 0))).toBeGreaterThan(at(8 * (shot[4] ?? 0)));
+    expect(at(8 * (shot[4] ?? 0))).toBeGreaterThan(at(0));
   });
 });
 
@@ -658,11 +697,11 @@ const golden = (stats: MatchStats): string => {
 };
 
 const GOLDEN: Readonly<Record<number, string>> = {
-  1: '2-0 | 0gk:7.30 1def:8.79 2mid:6.50 3fwd:6.13 4gk:7.41 5def:6.10 6mid:6.27 7fwd:6.34 | motm 1',
-  3: '3-4 | 0gk:6.62 1def:7.84 2mid:5.76 3fwd:8.63 4gk:7.04 5def:6.77 6mid:8.56 7fwd:8.97 | motm 7',
-  5: '3-2 | 0gk:7.07 1def:6.00 2mid:8.73 3fwd:7.87 4gk:7.77 5def:6.18 6mid:6.97 7fwd:7.59 | motm 2',
-  7: '1-3 | 0gk:5.78 1def:5.94 2mid:7.12 3fwd:7.18 4gk:6.36 5def:6.69 6mid:7.30 7fwd:8.21 | motm 7',
-  9: '0-3 | 0gk:5.90 1def:6.07 2mid:6.26 3fwd:6.29 4gk:7.16 5def:6.19 6mid:8.94 7fwd:7.98 | motm 6',
+  1: '2-0 | 0gk:7.26 1def:8.55 2mid:7.28 3fwd:6.38 4gk:7.78 5def:6.32 6mid:6.46 7fwd:6.66 | motm 1',
+  3: '3-4 | 0gk:6.78 1def:7.92 2mid:5.80 3fwd:8.30 4gk:7.33 5def:7.12 6mid:8.13 7fwd:8.51 | motm 7',
+  5: '3-2 | 0gk:7.37 1def:6.25 2mid:8.66 3fwd:7.48 4gk:8.26 5def:6.44 6mid:7.12 7fwd:7.32 | motm 2',
+  7: '1-3 | 0gk:5.70 1def:6.04 2mid:7.30 3fwd:7.45 4gk:6.48 5def:7.06 6mid:7.17 7fwd:7.83 | motm 7',
+  9: '0-3 | 0gk:5.89 1def:6.14 2mid:6.46 3fwd:6.54 4gk:7.07 5def:6.51 6mid:8.70 7fwd:7.41 | motm 6',
 };
 
 describe('golden matches', () => {
