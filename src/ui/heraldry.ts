@@ -1,4 +1,5 @@
 import type { House } from '../setup/houses';
+import { CLUB_ARMS } from './club-arms';
 import { h, svg } from './dom';
 import { PALETTE } from './palette';
 
@@ -46,7 +47,7 @@ const ARMS: Readonly<Record<string, Arms>> = {
 };
 
 function armsOf(house: House): Arms {
-  const found = ARMS[house.id] ?? ARMS.ember;
+  const found = ARMS[house.id] ?? CLUB_ARMS[house.id] ?? ARMS.ember;
   if (!found) throw new Error(`No arms for house ${house.id}`);
   return found;
 }
