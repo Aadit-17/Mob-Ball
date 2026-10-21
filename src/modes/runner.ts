@@ -28,8 +28,9 @@ export interface GoalLog {
   readonly step: number;
 }
 
-/** An AI manager: looks at the match once a second and may make a change. Must be deterministic. */
-export type Manager = (state: MatchState, team: TeamId) => ManagerAction | null;
+/** An AI manager: looks at the match once a second and may make a change. Must be deterministic. `stats` reads what
+ * every knight has done so far, the same however the match was chunked, for managers that judge play live. */
+export type Manager = (state: MatchState, team: TeamId, stats?: () => MatchStats) => ManagerAction | null;
 
 export interface FixtureConfig {
   readonly home: readonly KnightSpec[];
@@ -120,7 +121,7 @@ export class MatchRunner {
     }
     if (this.steps % MANAGER_EVERY === 0) {
       this.config.managers?.forEach((manager, team) => {
-        const action = manager?.(this.state, team as TeamId);
+        const action = manager?.(this.state, team as TeamId, () => this.recorder.stats);
         if (action) this.apply(team as TeamId, action);
       });
     }

@@ -4,6 +4,7 @@ import { MATCH, STEP } from '../../game/constants';
 import type { KnightSpec } from '../../game/match';
 import type { MatchState, Role, TeamId } from '../../game/types';
 import { clamp } from '../../game/vec';
+import type { MatchStats } from '../../stats/types';
 import type { Manager, ManagerAction } from '../runner';
 import { KEEPER_BUILD_VALUE, KEEPER_TIER_VALUE, OUTFIELD_BUILD_VALUE, OUTFIELD_TIER_VALUE } from './draft';
 import { SQUAD_SIZE, STARTERS, type HouseStyle, type SquadKnight } from './types';
@@ -194,7 +195,19 @@ export interface RivalSetup {
   readonly bench: readonly BenchOption[];
   /** Including this one. */
   readonly matchdaysLeft: number;
+  /** Decides the side's one change ahead of the manager, each poll until a change is made: a pair is made at once,
+   * 'hold' keeps the change unmade this poll, null leaves the poll to the manager. */
+  readonly first?: SubCall;
+  /** Starter slots the manager's own choice never takes off, and bench slots it never brings on. */
+  readonly exempt?: { readonly starters: readonly number[]; readonly bench: readonly number[] };
 }
+
+/** A substitution decided ahead of a rival manager (see RivalSetup.first). */
+export type SubCall = (
+  state: MatchState,
+  team: TeamId,
+  stats: (() => MatchStats) | undefined,
+) => Omit<RivalSub, 'step'> | 'hold' | null;
 
 /** The substitution a rival made: line-up slot off, bench slot on, and the step, for afterMatchday. */
 export interface RivalSub {
@@ -210,9 +223,9 @@ export interface RivalManager {
 }
 
 /** The share of the match gone by the clock, so stoppages never count toward a decision. */
-const clockGone = (state: MatchState): number => clamp(1 - state.clock / MATCH.duration, 0, 1);
+export const clockGone = (state: MatchState): number => clamp(1 - state.clock / MATCH.duration, 0, 1);
 
-const leadOf = (state: MatchState, team: TeamId): number =>
+export const leadOf = (state: MatchState, team: TeamId): number =>
   state.score[team] - state.score[team === 0 ? 1 : 0];
 
 /** Late on, behind charges and ahead holds; otherwise the house plays its own way. */
@@ -322,8 +335,9 @@ export function createRivalManager(setup: RivalSetup): RivalManager {
     let best: Omit<RivalSub, 'step'> | null = null;
     let bestValue = 0;
     for (const [offSlot, off] of on.entries()) {
-      if (!mayComeOff(off)) continue;
+      if (!mayComeOff(off) || setup.exempt?.starters.includes(offSlot)) continue;
       for (const [benchSlot, option] of setup.bench.entries()) {
+        if (setup.exempt?.bench.includes(benchSlot)) continue;
         const value = subValue(off, option, left, lead, weight);
         if (value > bestValue) [best, bestValue] = [{ offSlot, benchSlot }, value];
       }
@@ -331,7 +345,7 @@ export function createRivalManager(setup: RivalSetup): RivalManager {
     return best;
   }
 
-  const manage: Manager = (state, team): ManagerAction | null => {
+  const manage: Manager = (state, team, stats): ManagerAction | null => {
     const step = polls++ * POLL_STEPS;
     pitch ??= state.knights
       .filter((k) => k.team === team)
@@ -344,8 +358,9 @@ export function createRivalManager(setup: RivalSetup): RivalManager {
       }));
     const gone = clockGone(state);
     const lead = leadOf(state, team);
-    if (!made && gone >= (lead < 0 ? CHASING_SUB_AT : SUB_AT)) {
-      const sub = bestSub(pitch, 1 - gone, lead);
+    const call = made ? 'hold' : (setup.first?.(state, team, stats) ?? null);
+    if (call !== 'hold' && (call || gone >= (lead < 0 ? CHASING_SUB_AT : SUB_AT))) {
+      const sub = call ?? bestSub(pitch, 1 - gone, lead);
       const off = sub && pitch[sub.offSlot];
       const on = sub && setup.bench[sub.benchSlot];
       if (sub && off && on) {
