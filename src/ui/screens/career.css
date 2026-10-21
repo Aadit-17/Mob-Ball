@@ -1,0 +1,605 @@
+/* My Career: start, hub and matchday results. Builds on the cup's and Manager mode's pieces. */
+
+/* In a career match the player can be taken off, or wait on the bench: his controls step aside meanwhile. */
+.match.is-watching .touch-controls,
+.match.is-watching .barge {
+  display: none;
+}
+
+.cr-line {
+  margin: -6px 0 0;
+  color: var(--text-2);
+  font: 700 15px/1.3 var(--font-hud);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.cr-name {
+  margin: 0;
+  color: #fff3d6;
+  font-size: 22px;
+}
+
+.cr-sub {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font: 700 15px/1.3 var(--font-hud);
+  letter-spacing: 0.4px;
+}
+
+.cr-stars {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--gold);
+  font-size: 20px;
+  letter-spacing: 2px;
+  text-shadow: 0 2px 0 var(--drop);
+}
+
+.cr-label {
+  color: var(--text-2);
+  font: 700 13px/1.2 var(--font-hud);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.cr-none {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* ---------- start ---------- */
+.cr-start {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.cr-forged {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 18px 18px 20px;
+  text-align: center;
+}
+
+.cr-forged .ribbon {
+  margin-bottom: 6px;
+}
+
+.cr-start-portrait {
+  width: 150px;
+  height: 176px;
+}
+
+.cr-note {
+  margin: 8px 0 10px;
+  font-size: 14px;
+}
+
+.cr-setup {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px 18px;
+}
+
+.cr-setup .panel-title {
+  margin: 4px 0 0;
+}
+
+.cr-positions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cr-position {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--well);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px rgba(156, 132, 96, 0.55);
+  transition:
+    box-shadow 0.2s,
+    background 0.2s;
+}
+
+.cr-position b {
+  color: #fff3d6;
+  font: 700 17px/1.2 var(--font-head);
+}
+
+.cr-position small {
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.cr-position:hover {
+  box-shadow: inset 0 0 0 2px var(--gold-rim);
+}
+
+.cr-position[aria-pressed='true'] {
+  background: linear-gradient(180deg, rgba(242, 193, 78, 0.18), rgba(242, 193, 78, 0.06));
+  box-shadow:
+    inset 0 0 0 2px var(--gold),
+    0 0 0 1px var(--drop);
+}
+
+.cr-pick {
+  color: var(--gold);
+}
+
+.cr-club {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.cr-club-text {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.cr-club b {
+  color: #fff3d6;
+  font: 700 22px/1.2 var(--font-head);
+}
+
+.cr-club small {
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.cr-club .btn {
+  margin-top: 4px;
+  padding: 7px 14px;
+  font-size: 15px;
+}
+
+.md-crest.cr-crest {
+  flex: none;
+  width: 84px;
+  height: 100px;
+  padding-bottom: 16px;
+}
+
+.md-crest.cr-crest .crest {
+  width: 46px;
+  height: 46px;
+}
+
+.cr-begin {
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* ---------- hub ---------- */
+.cr-news {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 10px;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.cr-badge {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font: 800 14px/1.2 var(--font-hud);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.cr-news.is-start .cr-badge {
+  background: #2f6b34;
+  color: #e6ffd9;
+}
+
+.cr-news.is-bench .cr-badge {
+  background: #7a4a14;
+  color: #ffe6c2;
+}
+
+.cr-knight {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px 18px;
+}
+
+.cr-knight-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cr-portrait {
+  flex: none;
+  width: 96px;
+  height: 112px;
+  border-radius: 10px;
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 70%, rgba(255, 170, 80, 0.14), transparent 70%), var(--well);
+  box-shadow: inset 0 0 0 2px rgba(156, 132, 96, 0.5);
+}
+
+.cr-stats {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--well);
+}
+
+.cr-stat {
+  display: grid;
+  grid-template-columns: 76px auto 36px;
+  justify-content: start;
+  align-items: center;
+  gap: 10px;
+}
+
+.cr-pips {
+  display: flex;
+  gap: 4px;
+}
+
+.cr-pips i {
+  width: 18px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(156, 132, 96, 0.22);
+  transform: skewX(-18deg);
+}
+
+.cr-pips i.is-on {
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold-lo));
+  box-shadow: 0 1px 0 var(--bronze-shadow);
+}
+
+.cr-level {
+  color: var(--text);
+  font: 700 14px/1 var(--font-hud);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.cr-train {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cr-train p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.cr-train b {
+  color: var(--gold-text);
+  font: 800 22px/1 var(--font-hud);
+}
+
+.cr-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+}
+
+.cr-row > :nth-child(2):last-child {
+  grid-column: 2 / -1;
+}
+
+.cr-row > small {
+  color: var(--text);
+  font: 700 14px/1 var(--font-hud);
+  font-variant-numeric: tabular-nums;
+}
+
+.cr-row .stamina {
+  min-width: 0;
+}
+
+.cr-fame {
+  position: relative;
+  display: block;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px rgba(156, 132, 96, 0.5);
+}
+
+.cr-fame i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi));
+}
+
+.cr-knight-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cr-repick {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--well);
+}
+
+.cr-repick .lever-note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.cr-hub-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.cr-table table {
+  min-width: 520px;
+}
+
+/* Promotion and relegation places: a coloured edge on the place number. */
+.league-table tbody tr.is-up .col-pos {
+  box-shadow: inset 3px 0 0 #5fb04f;
+}
+
+.league-table tbody tr.is-down .col-pos {
+  box-shadow: inset 3px 0 0 #d0553a;
+}
+
+.cr-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 10px 0 0;
+  color: var(--text-2);
+  font: 700 13px/1.2 var(--font-hud);
+  letter-spacing: 0.5px;
+}
+
+.cr-key::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.cr-key.is-up::before {
+  background: #5fb04f;
+}
+
+.cr-key.is-down::before {
+  background: #d0553a;
+}
+
+.cr-key.is-top::before {
+  background: var(--gold);
+}
+
+.cr-season {
+  padding: 14px 16px 16px;
+}
+
+.cr-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cr-figure {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 4px;
+  min-height: 70px;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: var(--well);
+  text-align: center;
+}
+
+.cr-figure b {
+  color: #fff3d6;
+  font: 800 26px/1 var(--font-hud);
+  font-variant-numeric: tabular-nums;
+}
+
+.cr-figure b .rt-score {
+  font-size: 20px;
+}
+
+.cr-figure small {
+  color: var(--text-2);
+  font: 700 12px/1.15 var(--font-hud);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.cr-standing {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 15px;
+}
+
+.cr-foot {
+  justify-content: flex-start;
+}
+
+.cr-retire {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+}
+
+/* ---------- results ---------- */
+.cr-yours {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font: 700 16px/1.2 var(--font-hud);
+  letter-spacing: 0.4px;
+}
+
+.cr-yours .rt-score {
+  font-size: 18px;
+}
+
+.cr-motm {
+  color: var(--gold-text);
+}
+
+.cr-groups {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+
+.cr-group .panel-title {
+  margin: 0 0 8px;
+  text-align: left;
+}
+
+@media (max-width: 860px) {
+  .cr-start,
+  .cr-hub-lower {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cr-forged {
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    column-gap: 16px;
+    text-align: left;
+  }
+
+  .cr-forged .ribbon,
+  .cr-forged .cr-note,
+  .cr-forged .btn {
+    grid-column: 1 / -1;
+  }
+
+  .cr-start-portrait {
+    grid-row: 2 / span 3;
+    width: 96px;
+    height: 112px;
+  }
+}
+
+@media (max-width: 640px) {
+  .cr-positions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cr-knight,
+  .cr-setup,
+  .cr-season {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .cr-figures {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .cr-figure b {
+    font-size: 22px;
+  }
+}
+
+/* Four fixtures a division: four across on a wide screen, two on a tablet, one on a phone. */
+.cr-group .md-ties {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cr-row .stamina-label {
+  display: none;
+}
+
+.cr-row > small.is-tired {
+  color: #ffb08a;
+}
+
+.cr-train-btn.is-ready {
+  color: var(--gold-text);
+  box-shadow:
+    inset 0 0 0 2px var(--gold),
+    0 3px 0 var(--drop);
+}
+
+@media (max-width: 1000px) {
+  .cr-group .md-ties {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .cr-table table {
+    min-width: 0;
+  }
+
+  .cr-table .col-goals {
+    display: none;
+  }
+
+  .cr-table th,
+  .cr-table td {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .cr-pips i {
+    width: 14px;
+  }
+
+  .cr-group .md-ties {
+    gap: 8px;
+  }
+
+  .cr-group .tie-side {
+    gap: 6px;
+    padding-left: 7px;
+    padding-right: 3px;
+  }
+}
+
+@media (max-width: 340px) {
+  .cr-group .md-ties {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.watch .skip[hidden] {
+  display: none;
+}

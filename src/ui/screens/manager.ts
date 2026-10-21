@@ -110,7 +110,7 @@ function formGuide(form: readonly FormResult[]): HTMLElement {
 }
 
 /** A stamina bar with the FRESH mark on it; below the mark the knight is slower. */
-function staminaMeter(stamina: number, resting: boolean): HTMLElement {
+export function staminaMeter(stamina: number, resting: boolean): HTMLElement {
   const value = Math.round(stamina);
   const tired = value < FRESH;
   const share = (n: number): string => `${(n / STAMINA_MAX) * 100}%`;
@@ -138,7 +138,7 @@ function staminaMeter(stamina: number, resting: boolean): HTMLElement {
   );
 }
 
-function moveMark(move: number | undefined): HTMLElement {
+export function moveMark(move: number | undefined): HTMLElement {
   if (!move) return h('span', { class: 'move', text: '–', attrs: { 'aria-label': 'No change' } });
   const up = move > 0;
   return h('span', {
@@ -251,7 +251,7 @@ interface ScorersOptions {
 }
 
 /** A rating in its football-game colour band, as on the full-time screen. */
-const ratingChip = (rating: number, small = false): HTMLElement =>
+export const ratingChip = (rating: number, small = false): HTMLElement =>
   h('span', { class: `rt-score ${ratingBand(rating)}${small ? ' is-chip' : ''}`, text: shownRating(rating) });
 
 /** What a chart row shows besides the knight: its place, extra classes, a badge and the figure on the right. */
@@ -499,7 +499,7 @@ function goldenBoot(season: SeasonState): string | null {
 }
 
 /** The league as it stood before `matchday`: its results taken back out. */
-const withoutMatchday = (league: LeagueState, matchday: number): LeagueState => ({
+export const withoutMatchday = (league: LeagueState, matchday: number): LeagueState => ({
   ...league,
   results: league.results.map((day, d) => (d === matchday ? day.map(() => null) : day)),
 });
@@ -507,7 +507,7 @@ const withoutMatchday = (league: LeagueState, matchday: number): LeagueState => 
 const places = (league: LeagueState): Map<string, number> =>
   new Map(table(league).map((row, i) => [row.house, i]));
 
-function movesSince(before: ReadonlyMap<string, number>, league: LeagueState): Map<string, number> {
+export function movesSince(before: ReadonlyMap<string, number>, league: LeagueState): Map<string, number> {
   const now = places(league);
   return new Map([...now].map(([house, place]) => [house, (before.get(house) ?? place) - place]));
 }

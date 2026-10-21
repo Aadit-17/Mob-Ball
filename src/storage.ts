@@ -1,5 +1,7 @@
 import { DIFFICULTIES, TOP_TIER } from './ai/skills';
 import { normalizeLook, type Look } from './knight/look';
+import type { CareerState } from './modes/career/career';
+import { CAREER_STORAGE_KEY, normalizeCareer } from './modes/career/save';
 import { normalizeCup, type CupState } from './modes/cup/bracket';
 import { normalizeSeason, type SeasonState } from './modes/manager/season';
 import { REALM_HOUSES } from './setup/houses';
@@ -111,4 +113,10 @@ export const saveHonours = (honours: Honours): void => {
 export const loadSeason = (): SeasonState | null => normalizeSeason(read(SEASON_KEY));
 export const saveSeason = (season: SeasonState | null): void => {
   write(SEASON_KEY, season);
+};
+
+/** The career in progress, if any; one at a time, for as long as the player keeps it. */
+export const loadCareer = (): CareerState | null => normalizeCareer(read(CAREER_STORAGE_KEY));
+export const saveCareer = (career: CareerState | null): void => {
+  write(CAREER_STORAGE_KEY, career);
 };

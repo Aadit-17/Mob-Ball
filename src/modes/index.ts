@@ -1,20 +1,8 @@
+import { career } from './career';
 import { cup } from './cup';
 import { exhibition } from './exhibition';
 import { manager } from './manager';
 import type { GameMode } from './mode';
 
-const comingSoon = (id: string, name: string, blurb: string): GameMode => ({
-  id,
-  name,
-  blurb,
-  available: false,
-  start: () => undefined,
-});
-
 /** Every mode shown on the home screen, in order. New modes plug in here. */
-export const MODES: readonly GameMode[] = [
-  exhibition,
-  cup,
-  comingSoon('career', 'My Career', 'Take your knight from village team to royal squad.'),
-  manager,
-];
+export const MODES: readonly GameMode[] = [exhibition, cup, career, manager];

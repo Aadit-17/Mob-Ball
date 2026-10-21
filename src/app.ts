@@ -1,17 +1,20 @@
 import { DIFFICULTIES, type Difficulty } from './ai/skills';
 import { createRng, randomSeed } from './game/rng';
 import type { Look } from './knight/look';
+import type { CareerState } from './modes/career/career';
 import type { CupState } from './modes/cup/bracket';
 import type { SeasonState } from './modes/manager/season';
 import type { MatchSession } from './modes/mode';
 import { houseById, HOUSES, type House } from './setup/houses';
 import { createSquads, rollRivals, setTeamTier, withTier, type Squads } from './setup/squads';
 import {
+  loadCareer,
   loadCup,
   loadHonours,
   loadLook,
   loadPreferences,
   loadSeason,
+  saveCareer,
   saveCup,
   saveHonours,
   saveLook,
@@ -20,6 +23,7 @@ import {
   type Honours,
   type Preferences,
 } from './storage';
+import { mountCareer } from './ui/screens/career';
 import { mountCup } from './ui/screens/cup';
 import { mountDraft } from './ui/screens/draft';
 import { mountForge } from './ui/screens/forge';
@@ -28,7 +32,7 @@ import { mountManager } from './ui/screens/manager';
 import { mountMatch } from './ui/screens/match';
 import { mountSetup } from './ui/screens/setup';
 
-export type ScreenId = 'home' | 'forge' | 'setup' | 'match' | 'cup' | 'draft' | 'manager';
+export type ScreenId = 'home' | 'forge' | 'setup' | 'match' | 'cup' | 'draft' | 'manager' | 'career';
 
 /** What every screen can see and change. */
 export interface AppContext {
@@ -57,6 +61,9 @@ export interface AppContext {
   readonly season: SeasonState | null;
   setSeason(season: SeasonState | null): void;
   addLeagueWin(): void;
+  /** My Career, kept until the player retires it; saved on every change. */
+  readonly career: CareerState | null;
+  setCareer(career: CareerState | null): void;
 }
 
 type Mount = (root: HTMLElement, app: AppContext) => () => void;
@@ -69,6 +76,7 @@ const SCREENS: Record<ScreenId, Mount> = {
   cup: mountCup,
   draft: mountDraft,
   manager: mountManager,
+  career: mountCareer,
 };
 
 export class App implements AppContext {
@@ -80,6 +88,7 @@ export class App implements AppContext {
   cup = loadCup();
   honours = loadHonours();
   season = loadSeason();
+  career = loadCareer();
   private unmount: (() => void) | null = null;
 
   constructor(private readonly root: HTMLElement) {
@@ -149,6 +158,11 @@ export class App implements AppContext {
   setSeason(season: SeasonState | null): void {
     this.season = season;
     saveSeason(season);
+  }
+
+  setCareer(career: CareerState | null): void {
+    this.career = career;
+    saveCareer(career);
   }
 
   addLeagueWin(): void {
