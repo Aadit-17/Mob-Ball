@@ -1764,6 +1764,233 @@ main:has(> .match.touch) {
   font-size: 15px;
 }
 
+/* Full time: the scorers and ratings scroll on a short screen, so the buttons always stay in view. */
+.overlay-card:has(.ratings) {
+  display: flex;
+  flex-direction: column;
+  width: min(94%, 620px);
+  max-height: calc(100% - 16px);
+}
+
+.overlay-card:has(.ratings) > * {
+  flex: none;
+}
+
+.overlay-card:has(.ratings) .verdict {
+  margin-bottom: 2px;
+  font-size: 32px;
+}
+
+.overlay-card:has(.ratings) .final {
+  margin-bottom: 6px;
+}
+
+.overlay-card:has(.ratings) .overlay-actions {
+  padding-top: 10px;
+}
+
+.overlay-card:has(.ratings) > .result-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.result-body .scorers,
+.result-body .goalless {
+  margin-bottom: 8px;
+}
+
+.rt-sides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+}
+
+.rt {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 2px;
+  font: 600 15px/1.2 var(--font-body);
+  text-align: left;
+}
+
+.rt caption {
+  padding: 0 0 3px 8px;
+  border-left: 4px solid var(--home);
+  color: var(--gold-rim);
+  font: 700 13px/1.2 var(--font-head);
+  letter-spacing: 1px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.rt.away caption {
+  border-left-color: var(--away);
+}
+
+.rt td,
+.rt th {
+  padding: 3px 6px;
+  background: var(--well);
+}
+
+.rt td:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.rt td:last-child {
+  width: 1%;
+  border-radius: 0 6px 6px 0;
+  text-align: right;
+}
+
+.rt-role {
+  width: 1%;
+  color: var(--iron);
+  font: 700 12px/1 var(--font-hud);
+  letter-spacing: 1px;
+}
+
+.rt-name {
+  overflow: hidden;
+  max-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rt .is-you .rt-name {
+  color: var(--gold-text);
+}
+
+.rt .is-motm td,
+.rt .is-motm th {
+  background: #33291a;
+  box-shadow:
+    inset 0 2px 0 var(--gold-lo),
+    inset 0 -2px 0 var(--gold-lo);
+}
+
+.rt .is-motm td:first-child {
+  box-shadow:
+    inset 2px 2px 0 var(--gold-lo),
+    inset 0 -2px 0 var(--gold-lo);
+}
+
+.rt .is-motm td:last-child {
+  box-shadow:
+    inset -2px 2px 0 var(--gold-lo),
+    inset 0 -2px 0 var(--gold-lo);
+}
+
+.rt-star {
+  margin-left: 5px;
+  color: var(--gold);
+}
+
+/* Banded like football games: red under 6, plain to 7, green to 8, gold beyond. */
+.rt-score {
+  display: inline-block;
+  min-width: 38px;
+  padding: 2px 0;
+  border-radius: 4px;
+  font: 800 16px/1.1 var(--font-hud);
+  text-align: center;
+}
+
+.rt-score.low {
+  background: #8e2f25;
+  color: #ffe9e4;
+}
+
+.rt-score.fair {
+  background: #4a4350;
+  color: var(--text);
+}
+
+.rt-score.good {
+  background: #2f6b39;
+  color: #eaffea;
+}
+
+.rt-score.great {
+  background: linear-gradient(var(--gold-hi), #d9a03c);
+  color: var(--on-gold);
+}
+
+.rt-motm {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.rt-motm .rt-star {
+  margin: 0;
+}
+
+/* A phone held upright: one side above the other, so names have room. */
+@media (max-width: 520px) {
+  .rt-sides {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Short landscape screens: a wider card, a smaller verdict and the scorers on a line leave the ratings room. */
+@media (max-height: 480px) {
+  .overlay-card:has(.ratings) {
+    width: min(96%, 760px);
+    padding-bottom: 12px;
+  }
+
+  .overlay-card:has(.ratings) .ribbon {
+    margin-bottom: 4px;
+    padding-block: 4px 6px;
+  }
+
+  .overlay-card:has(.ratings) .verdict {
+    margin: 0;
+    font-size: 22px;
+  }
+
+  .overlay-card:has(.ratings) .final {
+    margin-bottom: 4px;
+    font-size: 20px;
+  }
+
+  .result-body .scorers {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0 14px;
+    margin-bottom: 4px;
+    font-size: 13px;
+  }
+
+  .rt {
+    border-spacing: 0 1px;
+    font-size: 13px;
+  }
+
+  .rt td,
+  .rt th {
+    padding: 1px 5px;
+  }
+
+  .rt-score {
+    font-size: 14px;
+  }
+
+  .rt-motm {
+    margin-top: 2px;
+    font-size: 13px;
+  }
+
+  .overlay-card:has(.ratings) .overlay-actions {
+    padding-top: 6px;
+  }
+}
+
 .overlay-actions {
   justify-content: center;
 }

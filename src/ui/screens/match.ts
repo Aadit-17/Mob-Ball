@@ -16,11 +16,13 @@ import { Effects } from '../../render/effects';
 import { setupCanvas } from '../../render/paint';
 import { MatchRenderer } from '../../render/renderer';
 import type { House } from '../../setup/houses';
+import { rateMatch } from '../../stats/ratings';
 import { choice } from '../choice';
 import { button, h } from '../dom';
 import { dragToSwap } from '../drag';
 import { blockColour, crest, icon } from '../heraldry';
 import { lozengeBurst, reducedMotion } from '../motion';
+import { ratingsBoard } from '../ratings';
 import { ROLE_NAMES } from './setup';
 
 /** Goals are replayed in slow motion for this long. */
@@ -558,6 +560,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       steps: runner.step,
       timeline: runner.timeline,
       goalLog: runner.goals,
+      ratings: rateMatch(runner.stats),
     };
     const [us, them] = result.score;
     const verdict = us > them ? 'Victory!' : us < them ? 'Defeat' : 'Draw';
@@ -585,7 +588,15 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         ' ',
         block(awayHouse, 'away'),
       ),
-      goals.length ? scorers : h('p', { class: 'goalless', text: 'A goalless scrap.' }),
+      h(
+        'div',
+        { class: 'result-body' },
+        goals.length ? scorers : h('p', { class: 'goalless', text: 'A goalless scrap.' }),
+        ratingsBoard(result.ratings, [homeHouse, awayHouse], (id) => {
+          const k = knightById(state, id);
+          return { name: k?.look.name ?? '', human: k?.human ?? false };
+        }),
+      ),
       h(
         'div',
         { class: 'overlay-actions' },

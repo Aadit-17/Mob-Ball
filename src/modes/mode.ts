@@ -3,6 +3,7 @@ import type { Tactics } from '../ai/tactics';
 import type { KnightSpec } from '../game/match';
 import type { TeamId } from '../game/types';
 import type { House } from '../setup/houses';
+import type { MatchRatings } from '../stats/ratings';
 import type { FixtureConfig, GoalLog, TimedAction } from './runner';
 
 export interface GoalRecord {
@@ -24,6 +25,8 @@ export interface MatchResult {
   readonly timeline: readonly TimedAction[];
   /** Every goal with the runner knight credited, for modes that keep scorers. */
   readonly goalLog: readonly GoalLog[];
+  /** Every knight's rating by runner id, and the man of the match, for modes that keep form. */
+  readonly ratings: MatchRatings;
 }
 
 export interface Dugout {
