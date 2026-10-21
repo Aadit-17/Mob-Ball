@@ -849,6 +849,16 @@ function headline(summary: SeasonSummary): Headline {
   }
 }
 
+/** "9 started · 3 off the bench · subbed off twice", or nothing when he started every one and played them out. */
+export function appsNote(summary: SeasonSummary): string | undefined {
+  const parts = [
+    summary.subOns > 0 && `${summary.starts} started`,
+    summary.subOns > 0 && `${summary.subOns} off the bench`,
+    summary.subOffs > 0 && `taken off ${summary.subOffs === 1 ? 'once' : `${summary.subOffs} times`}`,
+  ].filter((p): p is string => typeof p === 'string');
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 function seasonNumbers(career: CareerState, summary: SeasonSummary): HTMLElement {
   const best = bestMatch(career, summary.division, summary.club);
   const bestNote = best
@@ -861,7 +871,7 @@ function seasonNumbers(career: CareerState, summary: SeasonSummary): HTMLElement
     h(
       'dl',
       { class: 'cv-tiles' },
-      tile('Apps', String(summary.apps)),
+      tile('Apps', String(summary.apps), appsNote(summary)),
       tile('Goals', String(summary.goals)),
       tile('Assists', String(summary.assists)),
       tile('Man of the match', String(summary.motm)),

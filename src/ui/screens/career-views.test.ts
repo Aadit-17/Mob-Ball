@@ -3,9 +3,11 @@ import { ATTRIBUTE_CAPS, ATTRIBUTES, NO_ATTRIBUTES, type Attribute } from '../..
 import { DEFAULT_LOOK } from '../../knight/look';
 import { endSeason, PLAYER_ID, startCareer, type CareerState } from '../../modes/career/career';
 import { DECLINE_AGE, guardCost, trainCost, type Training } from '../../modes/career/economy';
+import { UPGRADE_COST } from '../../modes/career/upgrades';
 import { fixtures } from '../../modes/manager/league';
 import { fakeMatchday, fakeSeason } from '../../test/career';
 import {
+  appsNote,
   bestMatch,
   BENCH_MARGIN,
   clubSpells,
@@ -85,7 +87,7 @@ describe('buying', () => {
   });
 
   it('says why a level cannot be bought', () => {
-    expect(trainState(training({ points: 3 }), 'pace')).toEqual({ kind: 'short', cost: 10 });
+    expect(trainState(training({ points: 1 }), 'pace')).toEqual({ kind: 'short', cost: UPGRADE_COST.pace });
     expect(trainState(training({ points: 99, attributes: { ...NO_ATTRIBUTES, pace: 8 } }), 'pace').kind).toBe(
       'cap',
     );
@@ -176,6 +178,16 @@ describe('the season in review', () => {
     expect(seasonVerdict({ ...summary, honours: ['topScorer'], relegated: true })).toBe('boot');
     expect(seasonVerdict({ ...summary, honours: [], relegated: true })).toBe('relegated');
     expect(seasonVerdict({ ...summary, honours: [], relegated: false })).toBe('finish');
+  });
+
+  it('splits his appearances into starts and the bench only when he came on or off', () => {
+    const summary = endSeason(fakeSeason(start(), () => ({ score: [1, 0], player: 7 }))).history[0];
+    if (!summary) throw new Error('no summary');
+    const line = { ...summary, apps: 12, starts: 9, subOns: 3, subOffs: 0 };
+    expect(appsNote(line)).toBe('9 started · 3 off the bench');
+    expect(appsNote({ ...line, subOffs: 2 })).toBe('9 started · 3 off the bench · taken off 2 times');
+    expect(appsNote({ ...line, starts: 12, subOns: 0, subOffs: 1 })).toBe('taken off once');
+    expect(appsNote({ ...line, starts: 12, subOns: 0 })).toBeUndefined();
   });
 
   it('keeps every club spell, a return counting again', () => {
