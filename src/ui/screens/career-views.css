@@ -1135,6 +1135,13 @@
     font-size: 20px;
   }
 
+  .cv-who .ribbon {
+    padding: 5px 20px 7px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+
   .cv-purse {
     grid-column: 1 / -1;
     display: flex;
