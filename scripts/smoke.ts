@@ -1,7 +1,8 @@
 /// <reference types="node" />
 /**
  * Browser smoke test: builds the game, serves it, plays a full match in headless Chromium, starts a
- * Realm Cup, drafts and plays two Manager matchdays, then plays with touch on a landscape phone. Fails
+ * Realm Cup, drafts and plays two Manager matchdays, starts a career and plays two matchdays of it,
+ * then plays with touch on a landscape phone. Fails
  * on any console error or warning, and reports the JS heap along the way.
  *
  *   npm run smoke                                   (first run: `npx playwright install chromium`)
@@ -132,6 +133,73 @@ async function playManager(page: Page): Promise<void> {
   if (!note?.startsWith('Matchday 3 of 14'))
     throw new Error(`Home does not offer the season in progress (shows ${note ?? 'nothing'})`);
   console.log(`manager season resumed from home: ${note}`);
+}
+
+/** Plays a career match to full time: runs and kicks while he's on, and skips once he's off or benched. */
+async function playCareerMatch(page: Page): Promise<void> {
+  const started = Date.now();
+  while (!(await page.locator('.overlay:not([hidden]) .ratings').count())) {
+    if (Date.now() - started > MATCH_TIMEOUT_MS) throw new Error('Career match never reached full time');
+    const skip = page.getByRole('button', { name: 'Skip', exact: true });
+    if (await skip.isVisible()) {
+      await skip.click();
+      continue;
+    }
+    const key = MOVE_KEYS[Math.floor(Math.random() * MOVE_KEYS.length)] ?? 'd';
+    await page.keyboard.down(key);
+    await page.keyboard.down(' ');
+    await page.waitForTimeout(400);
+    await page.keyboard.up(key);
+    await page.keyboard.up(' ');
+  }
+}
+
+/** Starts a career, sims matchday 1, plays matchday 2 and reloads while the realm's results come in. */
+async function playCareer(page: Page): Promise<void> {
+  const card = page.locator('.mode', { hasText: 'My Career' });
+  await card.getByRole('button', { name: 'Play' }).click();
+  await page.getByRole('button', { name: /^Midfield/ }).click();
+  await shot(page, 'career-start');
+  await page.getByRole('button', { name: 'Begin your career' }).click();
+  await page.locator('.cr-next .ribbon', { hasText: 'Matchday 1 of 14' }).waitFor();
+  await shot(page, 'career-hub');
+
+  await page.getByRole('button', { name: 'Sim the match' }).click();
+  await page.getByRole('button', { name: 'On to matchday 2' }).waitFor({ timeout: 60_000 });
+  if ((await page.locator('.cr-results .tie').count()) !== 11)
+    throw new Error('Matchday results do not show the realm’s eleven other fixtures');
+  await shot(page, 'career-results');
+  await page.getByRole('button', { name: 'On to matchday 2' }).click();
+  await page.locator('.cr-next .ribbon', { hasText: 'Matchday 2 of 14' }).waitFor();
+  const played = await page.locator('.cr-table tbody tr.is-you td:nth-child(3)').textContent();
+  if (played !== '1') throw new Error(`The hub table shows ${played ?? 'nothing'} played after matchday 1`);
+  console.log(`career matchday 1 simmed · heap ${await heapMb(page)} MB`);
+
+  await page.locator('.cr-next .btn-primary').click();
+  await page.waitForSelector('canvas.pitch');
+  await page.waitForTimeout(3000);
+  await shot(page, 'career-match', false);
+  await page.getByRole('button', { name: 'Pause (Esc)' }).click();
+  if (await page.getByRole('button', { name: 'Restart' }).count())
+    throw new Error('A career match offers a restart');
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await playCareerMatch(page);
+  await page.getByRole('button', { name: 'Results across the realm' }).click();
+  await page.locator('.cr-results').waitFor();
+  console.log(`career matchday 2 played · heap ${await heapMb(page)} MB`);
+
+  // Leave mid-matchday: the hub must pick up the results still to come.
+  const pending = await page.locator('.cr-results .tie.is-pending').count();
+  if (!pending) throw new Error('Every result was in before the reload; nothing left to resume');
+  await page.reload();
+  const note = await card.locator('.mode-progress').textContent();
+  if (!note?.startsWith('Season 1 · Village League ·'))
+    throw new Error(`Home does not offer the career in progress (shows ${note ?? 'nothing'})`);
+  await card.getByRole('button', { name: 'Continue career' }).click();
+  await page.locator('.cr-results .tie.is-pending').first().waitFor();
+  await page.getByRole('button', { name: 'On to matchday 3' }).click({ timeout: 60_000 });
+  await page.locator('.cr-next .ribbon', { hasText: 'Matchday 3 of 14' }).waitFor();
+  console.log(`career resumed from home (${note}) and on to matchday 3 · heap ${await heapMb(page)} MB`);
 }
 
 interface Finger {
@@ -344,6 +412,8 @@ async function main(): Promise<void> {
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(baseUrl);
     await playManager(page);
+    await page.goto(baseUrl);
+    await playCareer(page);
     await playTouch(browser, baseUrl, problems);
   } finally {
     await browser.close();
