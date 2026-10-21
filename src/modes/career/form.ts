@@ -33,6 +33,8 @@ export const expectedRating = (role: Role): number =>
 export interface FormEntry {
   readonly day: number;
   readonly residual: number;
+  /** The share of the match he played, if not all of it: a cameo says less about him, so it weighs less. */
+  readonly share?: number;
 }
 
 /** Entries kept: older ones weigh under 0.85^8 ≈ 0.27 of a fresh one and barely move the reading. */
@@ -49,8 +51,8 @@ export const FORM_TIERS = 1;
 export function formResidual(form: readonly FormEntry[], today: number): number {
   let weighted = 0;
   let weight = FORM_PRIOR;
-  for (const { day, residual } of form) {
-    const w = FORM_DECAY ** Math.max(0, today - day);
+  for (const { day, residual, share = 1 } of form) {
+    const w = share * FORM_DECAY ** Math.max(0, today - day);
     weighted += w * residual;
     weight += w;
   }
@@ -96,8 +98,15 @@ export interface Selection {
   readonly incumbentValue: number;
 }
 
+/** What playing him is worth to his manager on top of his strength, in tiers: the club signed him to play, and a
+ * career on the bench is no career. PLAYING_TIME a full match (a cameo earns its share), APPEARANCE for getting on at
+ * all. Fitted in scripts/career.sim.ts: good form always starts, poor form still plays about four matches in five. */
+export const PLAYING_TIME = 0.5;
+export const APPEARANCE = 0.05;
+
 /** Whether the manager starts him over the knight the club would play in his place, on chooseLineup's measure:
- * strength less tiredness, now and later. In goal no tier counts, so a keeper's claim is his form. Ties go to him. */
+ * strength less tiredness, now and later, plus what playing him is worth. In goal no tier counts, so a keeper's claim is his form.
+ * Ties go to him. */
 export function selectPlayer(input: SelectionInput): Selection {
   const index = ['gk', 'def', 'mid', 'fwd'].indexOf(input.role);
   const incumbent = input.lineup.starters[index];
@@ -105,12 +114,15 @@ export function selectPlayer(input: SelectionInput): Selection {
   const weight = Math.max(0, input.matchdaysLeft - 1) * LOOKAHEAD[input.style];
   const keeper = input.role === 'gk';
   const ownCost = PLAY_COST * fatigueFactor(input.attributes);
-  const value = startValue(
-    (keeper ? 0 : input.strength) + input.form,
-    clamp(input.stamina, 0, STAMINA_MAX),
-    ownCost,
-    weight,
-  );
+  const value =
+    startValue(
+      (keeper ? 0 : input.strength) + input.form,
+      clamp(input.stamina, 0, STAMINA_MAX),
+      ownCost,
+      weight,
+    ) +
+    PLAYING_TIME +
+    APPEARANCE;
   const incumbentValue = startValue(
     keeper ? 0 : incumbent.knight.tier,
     clamp(input.incumbentStamina, 0, STAMINA_MAX),
@@ -118,4 +130,12 @@ export function selectPlayer(input: SelectionInput): Selection {
     weight,
   );
   return { starts: value >= incumbentValue, value, incumbent, incumbentValue };
+}
+
+/** Whether a benched forged knight comes on with `left` of the match to play: what he falls short by, and what his
+ * minutes are worth, count only for the minutes he would play (stamina too is spent by the minute), while APPEARANCE is
+ * earned whatever the length. So a near miss comes on, and one well short of a place stays out. */
+export function comesOn(selection: Selection, left: number): boolean {
+  const perMatch = selection.value - APPEARANCE - selection.incumbentValue;
+  return perMatch * clamp(left, 0, 1) + APPEARANCE >= 0;
 }

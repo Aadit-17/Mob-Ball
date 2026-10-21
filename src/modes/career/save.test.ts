@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LOOK } from '../../knight/look';
+import { fixtures } from '../manager/league';
 import { byRanking, fakeMatchday, fakeSeason } from '../../test/career';
 import {
+  CAREER_VERSION,
   endSeason,
   nextSeason,
   PLAYER_ID,
   startCareer,
   type CareerState,
+  type CareerSub,
   type FixtureRecord,
   type RoyalResult,
 } from './career';
@@ -47,6 +50,20 @@ const firstRecord = (s: Save, division: number): Writable<FixtureRecord> => {
   return record;
 };
 const squadOf = (s: Save, club: string) => s.world.squads[club] ?? [];
+/** The id of the `i`th knight of a side of the first fixture in the Village League. */
+function homeKnight(s: Save, side: 0 | 1, i: number): string {
+  const fixture = at(fixtures(at(s.season.leagues, 0), 0), 0);
+  return at(squadOf(s, side === 0 ? fixture.home : fixture.away), i).id;
+}
+/** A valid change by `side` in that fixture, with `over` applied. */
+const change = (s: Save, side: 0 | 1, over: Partial<CareerSub> = {}): CareerSub => ({
+  side,
+  off: homeKnight(s, side, 0),
+  on: homeKnight(s, side, 4),
+  minute: 61,
+  share: 0.67,
+  ...over,
+});
 const staminaOf = (s: Save, club: string): Record<string, number> => {
   const stamina = s.season.stamina[club];
   if (!stamina) throw new Error(`no stamina for ${club}`);
@@ -65,7 +82,7 @@ describe('career saves', () => {
 
   const broken: Record<string, (s: Save) => void> = {
     'a later version': (s) => {
-      poke(s, 'version', 2);
+      poke(s, 'version', CAREER_VERSION + 1);
     },
     'a negative seed': (s) => (s.seed = -1),
     'an age that does not match the seasons played': (s) => (s.player.age = 18),
@@ -110,6 +127,26 @@ describe('career saves', () => {
     'stamina past full': (s) => (staminaOf(s, 'mill')[at(squadOf(s, 'mill'), 0).id] = 101),
     'the forged knight scoring for another club': (s) =>
       (firstRecord(s, 1).goals = [{ side: 0, scorer: PLAYER_ID, assist: null, ownGoal: false }]),
+    'a substitute from the other side': (s) =>
+      (firstRecord(s, 0).subs = [change(s, 0, { on: homeKnight(s, 1, 4) })]),
+    'a stranger coming on': (s) => (firstRecord(s, 0).subs = [change(s, 0, { on: 'k9999' })]),
+    'a knight replacing himself': (s) =>
+      (firstRecord(s, 0).subs = [change(s, 0, { on: homeKnight(s, 0, 0) })]),
+    'two changes by one side': (s) =>
+      (firstRecord(s, 0).subs = [
+        change(s, 0),
+        change(s, 0, { off: homeKnight(s, 0, 1), on: homeKnight(s, 0, 5), share: 0.7 }),
+      ]),
+    'a change in minute 0': (s) => (firstRecord(s, 0).subs = [change(s, 0, { minute: 0 })]),
+    'a change past full time': (s) => (firstRecord(s, 0).subs = [change(s, 0, { share: 1.2 })]),
+    'changes out of order': (s) =>
+      (firstRecord(s, 0).subs = [change(s, 0, { share: 0.8 }), change(s, 1, { share: 0.6 })]),
+    'no list of changes': (s) => {
+      poke(firstRecord(s, 0), 'subs', undefined);
+    },
+    'a bot who shares his name': (s) =>
+      (at(squadOf(s, 'mill'), 0).look.name = ` ${s.player.look.name.toUpperCase()}`),
+    'a part match weighed as more than one': (s) => (s.player.form = [{ day: 0, residual: 0, share: 1.5 }]),
   };
 
   for (const [what, change] of Object.entries(broken))
@@ -163,6 +200,16 @@ describe('career saves', () => {
       expect(normalizeCareer(saved(review))).not.toBeNull();
       expect(normalizeCareer(saved(review, change))).toBeNull();
     });
+
+  it('accept a change on each side, and form from a season gone by', () => {
+    const raw = saved(midSeason, (s) => {
+      firstRecord(s, 0).subs = [change(s, 0), change(s, 1, { share: 0.7, minute: 64 })];
+      s.player.form = [{ day: 0, residual: -0.5, share: 0.33 }];
+    });
+    expect(normalizeCareer(raw)?.season.records[0]?.[0]?.[0]?.subs).toHaveLength(2);
+    const later = saved(second, (s) => (s.player.form = [{ day: 3, residual: 1 }]));
+    expect(normalizeCareer(later)?.player.form).toEqual([{ day: 3, residual: 1 }]);
+  });
 
   it('accept a royal run lost in the semi-final', () => {
     const raw = saved(review, (s) => {

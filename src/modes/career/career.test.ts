@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_LOOK } from '../../knight/look';
-import { currentMatchday, fixtures, isFinished, MATCHDAYS, table } from '../manager/league';
+import {
+  currentMatchday,
+  fixtures,
+  isFinished,
+  MATCHDAYS,
+  table,
+  type LeagueFixture,
+} from '../manager/league';
 import { MatchRunner } from '../runner';
 import { atClub, byRanking, fakeSeason } from '../../test/career';
 import {
@@ -20,8 +27,11 @@ import {
   type CareerState,
   type FixturePlan,
 } from './career';
-import { DIVISIONS, divisionOf, squadOfClub } from './clubs';
-import { HONOUR_POINTS } from './economy';
+import { DIVISIONS, divisionOf, type Division, sameName, squadOfClub, startingWorld } from './clubs';
+import { HONOUR_POINTS, TROPHY_MIN_APPS } from './economy';
+import { formResidual } from './form';
+import { REALM_HOUSES } from '../../setup/houses';
+import { roster } from '../../setup/rosters';
 import { normalizeCareer } from './save';
 
 const start = (seed = 11): CareerState => startCareer({ seed, look: DEFAULT_LOOK, position: 'mid' });
@@ -40,6 +50,29 @@ describe('a new career', () => {
     expect(c.season.leagues[0]?.playerHouse).toBe(c.player.club);
     expect(matchday(c)).toBe(0);
     expect(playerFixture(c)?.division).toBe(0);
+  });
+
+  it('renames the one bot who shares his name, whatever its case, and leaves the rest of the realm alone', () => {
+    const house = REALM_HOUSES[2];
+    if (!house) throw new Error('no house');
+    const taken = roster(house).fwd.name;
+    const before = Object.values(startingWorld().squads).flat();
+    for (const name of [taken, ` ${taken.toUpperCase()}`]) {
+      const c = startCareer({ seed: 4, look: { ...DEFAULT_LOOK, name }, position: 'fwd' });
+      const bots = Object.values(c.world.squads).flat();
+      expect(bots.filter((k) => sameName(k.look.name, name))).toEqual([]);
+      // Only the clashing knight changes, and only his name.
+      const changed = bots.flatMap((k, i) => (k === before[i] ? [] : [{ k, was: before[i] }]));
+      expect(changed).toHaveLength(1);
+      expect(changed[0]?.was?.look.name).toBe(taken);
+      expect({ ...changed[0]?.k, look: { ...changed[0]?.k.look, name: taken } }).toEqual(changed[0]?.was);
+      expect(new Set(bots.map((k) => k.look.name)).size).toBe(bots.length);
+      // The same realm in every career under that name.
+      expect(startCareer({ seed: 9, look: { ...DEFAULT_LOOK, name }, position: 'gk' }).world).toEqual(
+        c.world,
+      );
+    }
+    expect(start().world).toEqual(startingWorld());
   });
 
   it('starts at the chosen Village club, and refuses any other', () => {
@@ -98,6 +131,30 @@ describe('a season across three divisions', () => {
     expect(next.season.leagues[1]?.playerHouse).toBe(next.player.club);
     expect(next.season.leagues.every((l) => currentMatchday(l) === 0)).toBe(true);
     expect(village).toContain(next.player.club);
+  });
+
+  it('carries his form into the next season, still fading by the matchday', () => {
+    const ended = endSeason(done);
+    const form = [{ day: MATCHDAYS - 1, residual: -1.2 }];
+    const next = nextSeason({ ...ended, player: { ...ended.player, form } }, null);
+    expect(next.player.form).toEqual(form);
+    const today = MATCHDAYS;
+    expect(formResidual(next.player.form, today)).toBeLessThan(0);
+    expect(formResidual(next.player.form, today + 10)).toBeGreaterThan(formResidual(next.player.form, today));
+  });
+
+  it('counts the honours only with enough appearances, from the bench or not', () => {
+    const playedIn = (n: number) => (d: Division, f: LeagueFixture) => ({
+      ...byRanking(ranking)(d, f),
+      ...(f.matchday < n ? { player: 7 } : {}),
+    });
+    const few = endSeason(fakeSeason(c0, playedIn(TROPHY_MIN_APPS - 1))).history[0];
+    expect(few?.finish).toBe(1);
+    expect(few?.apps).toBe(TROPHY_MIN_APPS - 1);
+    expect(few?.honours).toEqual([]);
+    expect(few?.honourPoints).toBe(0);
+    const enough = endSeason(fakeSeason(c0, playedIn(TROPHY_MIN_APPS))).history[0];
+    expect(enough?.honours).toEqual(expect.arrayContaining(['title', 'promotion']));
   });
 
   it('takes him to the club whose offer he accepts, and only an offer he has', () => {

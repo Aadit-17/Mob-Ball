@@ -5,6 +5,8 @@ import { STAMINA_MAX } from '../manager/stamina';
 import { careerDay, selection, startCareer, type CareerState } from './career';
 import {
   addForm,
+  APPEARANCE,
+  PLAYING_TIME,
   expectedRating,
   FORM_KEEP,
   FORM_PRIOR,
@@ -20,6 +22,13 @@ describe('form', () => {
   it('reads nothing into no evidence, and shrinks a single match towards his stars', () => {
     expect(formResidual([], 10)).toBe(0);
     expect(formResidual([{ day: 10, residual: -2 }], 10)).toBeCloseTo(-2 / (FORM_PRIOR + 1));
+  });
+
+  it('weighs a part match by the share of it he played', () => {
+    expect(formResidual([{ day: 10, residual: -2, share: 0.5 }], 10)).toBeCloseTo(-1 / (FORM_PRIOR + 0.5));
+    expect(formResidual([{ day: 10, residual: -2, share: 1 / 3 }], 10)).toBeGreaterThan(
+      formResidual([{ day: 10, residual: -2 }], 10),
+    );
   });
 
   it('weighs recent matches most, so old evidence fades while he sits out', () => {
@@ -75,14 +84,19 @@ describe('selection', () => {
     expect(selection(even).starts).toBe(true);
   });
 
-  it('drops him after a bad run, and he wins his place back with good matches', () => {
-    const bad = run(-1.5, 5, today);
-    expect(selection(withForm(even, bad)).starts).toBe(false);
-    expect(selection(withForm(even, [...bad, ...run(1.5, 3, today)])).starts).toBe(true);
+  it('drops him after a long bad run, and he wins his place back with good matches', () => {
+    expect(selection(withForm(even, run(-2.5, FORM_KEEP, today))).starts).toBe(false);
+    expect(selection(withForm(even, [...run(-2.5, 5, today - 3), ...run(2.5, 3, today)])).starts).toBe(true);
+  });
+
+  it('keeps him in the side through a run that would drop a knight of the club, for what playing him is worth', () => {
+    const pick = selection(withForm(even, run(-1.25, FORM_KEEP, today)));
+    expect(pick.value - PLAYING_TIME - APPEARANCE).toBeLessThan(pick.incumbentValue);
+    expect(pick.starts).toBe(true);
   });
 
   it('brings him back once a bad run is old enough, as the manager forgets', () => {
-    const bad = run(-1.5, 5, 0);
+    const bad = run(-3, FORM_KEEP, 0);
     const lineup = selection(even);
     const pick = (day: number) =>
       selectPlayer({
@@ -110,7 +124,7 @@ describe('selection', () => {
   it('judges a keeper on form: no keeper tier is worth anything', () => {
     const keeper = { ...career, player: { ...career.player, position: 'gk' as const } };
     expect(selection(keeper).starts).toBe(true);
-    expect(selection(withForm(keeper, run(-1, 3, today))).starts).toBe(false);
+    expect(selection(withForm(keeper, run(-2.5, FORM_KEEP, today))).starts).toBe(false);
     expect(selection(withForm(keeper, run(1, 3, today))).starts).toBe(true);
   });
 });

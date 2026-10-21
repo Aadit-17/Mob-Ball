@@ -8,6 +8,7 @@ import {
   freshName,
   recruitTier,
   RECRUIT_OLDEST,
+  takenWith,
   YOUNGEST,
   type CareerKnight,
   type World,
@@ -35,10 +36,12 @@ export const RETIRE_AGE = 34;
 export const MOVE_CHANCE = 0.08;
 
 /** A summer of comings and goings: everyone ages, the old retire, a few move on, and each club signs young at the level
- * of the division it now plays in, so each division stays near its tier and a promoted club grows into it. */
-export function churn(world: World, seed: number): World {
+ * of the division it now plays in, so each division stays near its tier and a promoted club grows into it. No signing
+ * takes the `reserved` name (the forged knight's). */
+export function churn(world: World, seed: number, reserved?: string): World {
   const rng = createRng(seed);
-  const taken = new Set(Object.values(world.squads).flatMap((s) => s.map((k) => k.look.name)));
+  const names = Object.values(world.squads).flatMap((s) => s.map((k) => k.look.name));
+  const taken = reserved === undefined ? new Set(names) : takenWith(names, reserved);
   let next = world.nextKnight;
   const squads: Record<string, CareerKnight[]> = {};
   for (const club of CLUB_IDS) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createLeague, recordResult, fixtures, MATCHDAYS, table, type LeagueState } from '../manager/league';
-import { DIVISION_TIER, DIVISIONS, divisionOf, startingWorld, type World } from './clubs';
+import { DIVISION_TIER, DIVISIONS, divisionOf, sameName, startingWorld, type World } from './clubs';
 import { churn, MOVE_CHANCE, promote, RETIRE_AGE } from './world';
 
 const world = startingWorld();
@@ -106,6 +106,18 @@ describe('the summer churn', () => {
       for (const k of fresh(moved, club)) expect(k.tier).toBeGreaterThanOrEqual(2);
     for (const club of world.divisions[2] ?? [])
       for (const k of fresh(moved, club)) expect(k.tier).toBeLessThanOrEqual(2);
+  });
+
+  it('never signs a knight under the forged knight’s name, in any case', () => {
+    const signed = (w: World) =>
+      Object.values(w.squads)
+        .flat()
+        .filter((k) => !ids(world).includes(k.id))
+        .map((k) => k.look.name);
+    const name = signed(after)[0];
+    if (!name) throw new Error('nobody signed');
+    for (const reserved of [name, name.toLowerCase()])
+      expect(signed(churn(world, 77, reserved)).filter((n) => sameName(n, name))).toEqual([]);
   });
 
   it('is the same summer from the same seed, and a different one from another', () => {

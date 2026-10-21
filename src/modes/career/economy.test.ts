@@ -37,6 +37,14 @@ describe('match points', () => {
     expect(matchPoints(Number.NaN)).toBe(0);
   });
 
+  it('pay a part match for the share of it he played', () => {
+    expect(matchPoints(8, 1)).toBe(matchPoints(8));
+    expect(matchPoints(8, 1 / 3)).toBe(2);
+    expect(matchPoints(9, 0.5)).toBe(6);
+    expect(matchPoints(9, 0)).toBe(0);
+    expect(matchPoints(9, 1 / 3)).toBeLessThan(matchPoints(9));
+  });
+
   it('never fall as the rating rises, and rise faster the higher it goes', () => {
     let last = 0;
     for (let r = 3; r <= 10; r += 0.01) {
@@ -64,8 +72,8 @@ describe('training', () => {
   });
 
   it('needs the points', () => {
-    expect(trainCost(young(9), 'pace')).toBeNull();
-    expect(trainCost(young(10), 'pace')).toBe(10);
+    expect(trainCost(young(UPGRADE_COST.pace - 1), 'pace')).toBeNull();
+    expect(trainCost(young(UPGRADE_COST.pace), 'pace')).toBe(UPGRADE_COST.pace);
   });
 
   it('raises stats only before the decline age; after it points can only guard', () => {

@@ -22,17 +22,23 @@ import {
 } from '../manager/league';
 import {
   afterMatchday,
+  CHASING_SUB_AT,
   chooseLineup,
+  clockGone,
   createRivalManager,
   freshStamina,
+  leadOf,
+  playingShares,
   REST_GAIN,
   PLAY_COST,
   squadKnightSpec,
   STAMINA_MAX,
   staminaFactor,
+  SUB_AT,
   type Lineup,
   type RivalManager,
   type Stamina,
+  type SubCall,
   type Substitution,
 } from '../manager/stamina';
 import { MatchRunner, type FixtureConfig, type Manager } from '../runner';
@@ -44,7 +50,9 @@ import {
   freshName,
   squadOfClub,
   startingWorld,
+  takenWith,
   TOP_DIVISION,
+  withoutName,
   type CareerKnight,
   type Division,
   type World,
@@ -56,11 +64,13 @@ import {
   matchPoints,
   nextFame,
   train,
+  TROPHY_MIN_APPS,
   type Honour,
   type Training,
 } from './economy';
 import {
   addForm,
+  comesOn,
   expectedRating,
   formTiers,
   matchStrength,
@@ -74,7 +84,7 @@ import { fatigueFactor } from '../../game/attributes';
 import { humanKnightSpec, overallStars, simKnightSpec } from './stars';
 import { churn, promote } from './world';
 
-export const CAREER_VERSION = 1;
+export const CAREER_VERSION = 2;
 export const START_AGE = 17;
 export const POSITIONS: readonly Role[] = ['gk', 'def', 'mid', 'fwd'];
 /** The forged knight's squad id in every record. */
@@ -89,11 +99,23 @@ export interface CareerGoal {
   readonly ownGoal: boolean;
 }
 
-/** A played fixture: its goals, every knight's rating (to 0.01) by squad id, and the man of the match. */
+/** A substitution in a career fixture: the side that made it (0 home, 1 away), who went off and who came on by squad
+ * id, the minute on a 90-minute clock ("came on 62'"), and the share of the match gone, which their minutes follow. */
+export interface CareerSub {
+  readonly side: 0 | 1;
+  readonly off: string;
+  readonly on: string;
+  readonly minute: number;
+  readonly share: number;
+}
+
+/** A played fixture: its goals, every knight's rating (to 0.01) by squad id, the man of the match, and the changes
+ * (at most one a side), in the order they were made. */
 export interface FixtureRecord {
   readonly goals: readonly CareerGoal[];
   readonly ratings: Readonly<Record<string, number>>;
   readonly motm: string | null;
+  readonly subs: readonly CareerSub[];
 }
 
 export interface CareerPlayer extends Training {
@@ -152,7 +174,11 @@ export interface SeasonSummary {
   readonly position: Role;
   /** His club's final place, 1 to 8. */
   readonly finish: number;
+  /** Appearances, starting or from the bench; then those he started, came on in, and was taken off in. */
   readonly apps: number;
+  readonly starts: number;
+  readonly subOns: number;
+  readonly subOffs: number;
   readonly goals: number;
   readonly assists: number;
   readonly motm: number;
@@ -237,7 +263,7 @@ export interface CareerStart {
 }
 
 export function startCareer(start: CareerStart): CareerState {
-  const world = startingWorld();
+  const world = withoutName(startingWorld(), start.look.name);
   const village = world.divisions[0] ?? [];
   const club = start.club ?? createRng(streamSeed(start.seed, 0, STREAM.start)).pick(village);
   if (!village.includes(club)) throw new Error('A career starts at a Village League club');
@@ -378,6 +404,8 @@ export interface Sheet {
   readonly bench: readonly SheetEntry[];
   /** The forged knight's place in the starters, if he starts. */
   readonly playerSlot: number | null;
+  /** His place on the bench, if he starts there: last, after the club's own substitutes. */
+  readonly playerBench: number | null;
 }
 
 /** The forged knight as the runner gets him, slowed by tiredness like every other knight. */
@@ -388,7 +416,8 @@ export function playerSpec(player: CareerPlayer, mode: PlayMode): KnightSpec {
   return { ...spec, speedFactor: spec.speedFactor * staminaFactor(player.stamina) };
 }
 
-function sheetOf(career: CareerState, club: string, mode: PlayMode): Sheet {
+/** A club's side; at his club, `starts` puts him in his position, or else on the bench. */
+function sheetOf(career: CareerState, club: string, mode: PlayMode, starts: boolean | null): Sheet {
   const lineup = clubLineup(career, club);
   const entry = (knight: CareerKnight, role: Role): SheetEntry => {
     const stamina = staminaOf(career, club, knight.id);
@@ -396,45 +425,105 @@ function sheetOf(career: CareerState, club: string, mode: PlayMode): Sheet {
   };
   const starters = lineup.starters.map((s) => entry(s.knight as CareerKnight, s.role));
   const bench = lineup.bench.map((k) => entry(k as CareerKnight, 'mid'));
-  if (club !== career.player.club || !selection(career).starts)
-    return { club, starters, bench, playerSlot: null };
-  const slot = POSITIONS.indexOf(career.player.position);
-  const dropped = starters[slot];
+  if (starts === null) return { club, starters, bench, playerSlot: null, playerBench: null };
   const { player } = career;
-  const strength = matchStrength(player.look.build, player.attributes);
   const me: SheetEntry = {
     id: PLAYER_ID,
     spec: playerSpec(player, mode),
-    tier: strength,
+    tier: matchStrength(player.look.build, player.attributes),
     stamina: player.stamina,
   };
+  if (!starts)
+    return {
+      club,
+      starters,
+      bench: [...bench, { ...me, spec: { ...me.spec, role: 'mid' } }],
+      playerSlot: null,
+      playerBench: bench.length,
+    };
+  const slot = POSITIONS.indexOf(player.position);
+  const dropped = starters[slot];
   return {
     club,
     starters: starters.map((s, i) => (i === slot ? me : s)),
     bench: dropped ? [{ ...dropped, spec: { ...dropped.spec, role: 'mid' } }, ...bench] : bench,
     playerSlot: slot,
+    playerBench: null,
   };
 }
 
-/** A club's touchline manager; at the forged knight's club it never takes him off (he plays the whole match). */
-function managerFor(career: CareerState, sheet: Sheet): RivalManager {
-  const manager = createRivalManager({
+/** A starting forged knight rated under this at the hour comes off: 1.8 standard deviations below the live reading's
+ * mean (6.8, sd 1.0 at the hour, as for a whole match), a true stinker. scripts/career.sim.ts measures it firing in
+ * about 1 start in 50; those knights end the match on about 4.6. */
+export const HOOK_RATING = 5;
+
+/** A club's touchline manager, and what it made of the forged knight. */
+interface Touchline extends RivalManager {
+  /** The share of the clock gone when the change was made, null without one. */
+  gone(): number | null;
+  /** His live rating when he was judged at the hour, null if he wasn't. */
+  judged(): number | null;
+}
+
+/** His call on his club's one change, held for him until settled. Starting: judged live at the hour, when rivals
+ * change, he makes way for the knight he displaced under HOOK_RATING. Benched: he comes on for the starter in his
+ * position at the hour (from half-time when chasing) if `comesOn`. */
+function forgedCall(
+  sheet: Sheet,
+  position: number,
+  pick: Selection | null,
+  judge: (r: number) => void,
+): SubCall {
+  let settled = sheet.playerSlot === null && sheet.playerBench === null;
+  return (state, team, stats) => {
+    if (settled) return null;
+    const gone = clockGone(state);
+    const slot = sheet.playerSlot;
+    if (slot !== null) {
+      if (gone < SUB_AT) return 'hold';
+      settled = true;
+      const id = state.knights.filter((k) => k.team === team)[slot]?.id;
+      const rating = stats && rateMatch(stats()).knights.find((k) => k.id === id)?.rating;
+      if (rating === undefined) return null;
+      judge(rating);
+      return rating < HOOK_RATING ? { offSlot: slot, benchSlot: 0 } : null;
+    }
+    const bench = sheet.playerBench;
+    if (bench === null || gone < (leadOf(state, team) < 0 ? CHASING_SUB_AT : SUB_AT)) return 'hold';
+    if (pick && comesOn(pick, 1 - gone)) {
+      settled = true;
+      return { offSlot: position, benchSlot: bench };
+    }
+    settled = gone >= SUB_AT;
+    return settled ? null : 'hold';
+  };
+}
+
+/** A club's touchline manager; at his club the change is his first (see forgedCall), and its own choice never takes him
+ * off or brings him on. */
+function managerFor(career: CareerState, sheet: Sheet, pick: Selection | null): Touchline {
+  let judged: number | null = null;
+  let gone: number | null = null;
+  const inner = createRivalManager({
     style: clubById(sheet.club).style,
     starters: sheet.starters.map((s) => s.stamina),
     bench: sheet.bench.map((b) => ({ spec: b.spec, stamina: b.stamina })),
     matchdaysLeft: MATCHDAYS - matchday(career),
-  });
-  const slot = sheet.playerSlot;
-  if (slot === null) return manager;
-  let blocked = false;
-  return {
-    manage(state, team) {
-      const action = manager.manage(state, team);
-      if (action?.kind !== 'substitution' || action.offId !== slot) return action;
-      blocked = true;
-      return null;
+    first: forgedCall(sheet, POSITIONS.indexOf(career.player.position), pick, (r) => (judged = r)),
+    exempt: {
+      starters: sheet.playerSlot === null ? [] : [sheet.playerSlot],
+      bench: sheet.playerBench === null ? [] : [sheet.playerBench],
     },
-    substitution: () => (blocked ? null : manager.substitution()),
+  });
+  return {
+    manage(state, team, stats) {
+      const action = inner.manage(state, team, stats);
+      if (action?.kind === 'substitution') gone = clockGone(state);
+      return action;
+    },
+    substitution: () => inner.substitution(),
+    gone: () => gone,
+    judged: () => judged,
   };
 }
 
@@ -452,6 +541,9 @@ export interface FixturePlan {
   readonly sheets: readonly [Sheet, Sheet];
   /** A fresh runner config, with fresh touchline managers, for every kick-off. */
   config(): FixtureConfig;
+  /** The forged knight's live rating when his manager judged him at the hour of the last kick-off's match, null if he
+   * wasn't on the pitch to judge (or it hasn't come). */
+  judged(): number | null;
   finish(career: CareerState, outcome: CareerOutcome): CareerState;
 }
 
@@ -478,6 +570,9 @@ function substitutionOf(sheet: Sheet, manager: RivalManager | null): Substitutio
   return sub && offId && onId ? { offId, onId, step: sub.step } : null;
 }
 
+/** A clock share as the match screen shows it: a full match reads as 90 minutes. */
+const minuteOf = (gone: number): number => clamp(Math.ceil(gone * 90), 1, 90);
+
 export function planFixture(career: CareerState, ref: FixtureRef, mode: PlayMode = 'sim'): FixturePlan {
   if (career.review) throw new Error('The season is over');
   const fixture = fixtureAt(career, ref);
@@ -485,19 +580,20 @@ export function planFixture(career: CareerState, ref: FixtureRef, mode: PlayMode
   const mine = involves(fixture, career.player.club);
   const leftClub = mine ? career.player.club : fixture.home;
   const leftIsHome = fixture.home === leftClub;
+  const pick = mine ? selection(career) : null;
   const sheets = [
-    sheetOf(career, leftClub, mode),
-    sheetOf(career, leftIsHome ? fixture.away : fixture.home, mode),
+    sheetOf(career, leftClub, mode, pick?.starts ?? null),
+    sheetOf(career, leftIsHome ? fixture.away : fixture.home, mode, null),
   ] as const;
   const league = leagueOf(career, ref.division);
-  let managers: readonly [RivalManager | null, RivalManager | null] = [null, null];
+  let managers: readonly [Touchline | null, Touchline | null] = [null, null];
 
   return {
     ref,
     fixture,
     sheets,
     config() {
-      managers = [managerFor(career, sheets[0]), managerFor(career, sheets[1])];
+      managers = [managerFor(career, sheets[0], pick), managerFor(career, sheets[1], null)];
       return {
         home: sheets[0].starters.map((s) => s.spec),
         away: sheets[1].starters.map((s) => s.spec),
@@ -510,9 +606,11 @@ export function planFixture(career: CareerState, ref: FixtureRef, mode: PlayMode
         ],
       };
     },
+    judged: () => managers[0]?.judged() ?? null,
     finish(current, outcome) {
       const subs = [substitutionOf(sheets[0], managers[0]), substitutionOf(sheets[1], managers[1])] as const;
-      return recordFixture(current, ref, fixtureRecord(sheets, subs, outcome, leftIsHome), {
+      const gone = [managers[0]?.gone() ?? null, managers[1]?.gone() ?? null] as const;
+      return recordFixture(current, ref, fixtureRecord(sheets, subs, gone, outcome, leftIsHome), {
         sheets,
         steps: outcome.steps,
         subs,
@@ -526,6 +624,7 @@ export function planFixture(career: CareerState, ref: FixtureRef, mode: PlayMode
 function fixtureRecord(
   sheets: readonly [Sheet, Sheet],
   subs: readonly [Substitution | null, Substitution | null],
+  gone: readonly [number | null, number | null],
   outcome: CareerOutcome,
   leftIsHome: boolean,
 ): FixtureRecord {
@@ -547,7 +646,15 @@ function fixtureRecord(
     const id = idOf(k.id);
     if (id) rated[id] = round2(k.rating);
   }
-  return { goals, ratings: rated, motm: idOf(ratings.motm) };
+  const changes = subs
+    .flatMap((sub, team) => (sub ? [{ sub, team }] : []))
+    .sort((a, b) => a.sub.step - b.sub.step || a.team - b.team)
+    .map(({ sub, team }): CareerSub => {
+      const share = sub.step / outcome.steps;
+      const side = (leftIsHome ? team : 1 - team) as 0 | 1;
+      return { side, off: sub.offId, on: sub.onId, minute: minuteOf(gone[team] ?? share), share };
+    });
+  return { goals, ratings: rated, motm: idOf(ratings.motm), subs: changes };
 }
 
 /** What the match did to stamina and form, beyond the record itself. */
@@ -573,19 +680,24 @@ function recordFixture(
 
   const stamina: Record<string, Stamina> = { ...season.stamina };
   let playerStamina = player.stamina;
+  let share = 0;
   fx.sheets.forEach((sheet, team) => {
     const clubStamina = { ...(season.stamina[sheet.club] ?? {}) };
     const mine = sheet.club === player.club;
-    const charged = afterMatchday(mine ? { ...clubStamina, [PLAYER_ID]: player.stamina } : clubStamina, {
+    const play = {
       starters: sheet.starters.map((s) => s.id),
       substitution: fx.subs[team] ?? null,
       matchSteps: fx.steps,
-    });
+    };
+    const charged = afterMatchday(mine ? { ...clubStamina, [PLAYER_ID]: player.stamina } : clubStamina, play);
     stamina[sheet.club] = Object.fromEntries(Object.entries(charged).filter(([id]) => id !== PLAYER_ID));
     if (mine) {
-      const played = sheet.playerSlot !== null;
+      // His own stamina stat slows the drain, so his is charged here rather than by afterMatchday.
+      share = playingShares(play).get(PLAYER_ID) ?? 0;
       playerStamina = clamp(
-        played ? player.stamina - PLAY_COST * fatigueFactor(player.attributes) : player.stamina + REST_GAIN,
+        share > 0
+          ? player.stamina - PLAY_COST * fatigueFactor(player.attributes) * share
+          : player.stamina + REST_GAIN,
         0,
         STAMINA_MAX,
       );
@@ -595,15 +707,15 @@ function recordFixture(
   let nextPlayer: CareerPlayer = { ...player, stamina: playerStamina };
   let points = season.points;
   const rating = record.ratings[PLAYER_ID];
-  const mySheet = fx.sheets[0];
-  if (rating !== undefined && mySheet.club === player.club && mySheet.playerSlot !== null) {
+  if (rating !== undefined && share > 0) {
     const expected = expectedRating(player.position);
-    const earned = matchPoints(rating);
+    const earned = matchPoints(rating, share);
+    const entry = { day: careerDay(career), residual: round2(rating - expected) };
     points += earned;
     nextPlayer = {
       ...nextPlayer,
       points: player.points + earned,
-      form: addForm(player.form, { day: careerDay(career), residual: round2(rating - expected) }),
+      form: addForm(player.form, share < 1 ? { ...entry, share } : entry),
     };
   }
 
@@ -676,7 +788,10 @@ export const playerStars = (player: CareerPlayer): number =>
 
 export interface KnightSeason {
   readonly id: string;
+  /** Matches he played in; those he came on in, and those he was taken off in. */
   readonly apps: number;
+  readonly subOns: number;
+  readonly subOffs: number;
   readonly goals: number;
   readonly assists: number;
   readonly motm: number;
@@ -687,7 +802,7 @@ export interface KnightSeason {
 export function divisionSeason(career: CareerState, division: Division): Map<string, KnightSeason> {
   const out = new Map<string, KnightSeason>();
   const get = (id: string): KnightSeason =>
-    out.get(id) ?? { id, apps: 0, goals: 0, assists: 0, motm: 0, ratingSum: 0 };
+    out.get(id) ?? { id, apps: 0, subOns: 0, subOffs: 0, goals: 0, assists: 0, motm: 0, ratingSum: 0 };
   for (const record of (career.season.records[division] ?? []).flat()) {
     if (!record) continue;
     for (const [id, rating] of Object.entries(record.ratings)) {
@@ -695,6 +810,8 @@ export function divisionSeason(career: CareerState, division: Division): Map<str
       out.set(id, {
         ...k,
         apps: k.apps + 1,
+        subOns: k.subOns + (record.subs.some((s) => s.on === id) ? 1 : 0),
+        subOffs: k.subOffs + (record.subs.some((s) => s.off === id) ? 1 : 0),
         ratingSum: k.ratingSum + rating,
         motm: k.motm + (record.motm === id ? 1 : 0),
       });
@@ -770,10 +887,10 @@ export function playRoyal(career: CareerState, squad: readonly string[]): RoyalR
   });
   const slot = POSITIONS.indexOf(player.position);
   const matches: RoyalMatch[] = [];
-  const taken = new Set([
+  const taken = takenWith(
+    Object.values(world.squads).flatMap((s) => s.map((k) => k.look.name)),
     player.look.name,
-    ...Object.values(world.squads).flatMap((s) => s.map((k) => k.look.name)),
-  ]);
+  );
   for (const [round, mean] of ROYAL_RIVAL_TIERS.entries()) {
     const away = POSITIONS.map((role, i) => {
       const tier = clamp(mean + rng.pick([-1, 0, 0, 1]), 0, 4);
@@ -888,9 +1005,10 @@ export function endSeason(career: CareerState): CareerState {
   const squad = royalCall(career);
   const royal = squad ? playRoyal(career, squad) : null;
   const honours: Honour[] = [];
-  if (finish === 1) honours.push('title');
-  if (division < TOP_DIVISION && finish <= 2) honours.push('promotion');
-  if (goals > 0 && goals === topGoals) honours.push('topScorer');
+  const counts = (me?.apps ?? 0) >= TROPHY_MIN_APPS;
+  if (counts && finish === 1) honours.push('title');
+  if (counts && division < TOP_DIVISION && finish <= 2) honours.push('promotion');
+  if (counts && goals > 0 && goals === topGoals) honours.push('topScorer');
   if (royal) honours.push('royalCall');
   if (royal?.crowned) honours.push('royalCrown');
 
@@ -908,6 +1026,9 @@ export function endSeason(career: CareerState): CareerState {
     position: player.position,
     finish,
     apps: me?.apps ?? 0,
+    starts: (me?.apps ?? 0) - (me?.subOns ?? 0),
+    subOns: me?.subOns ?? 0,
+    subOffs: me?.subOffs ?? 0,
     goals,
     assists: me?.assists ?? 0,
     motm: me?.motm ?? 0,
@@ -930,18 +1051,25 @@ export function endSeason(career: CareerState): CareerState {
 }
 
 /** The next season: promotion and relegation, the summer's churn, his move (`club`, one of the offers, or null to
- * stay) and a year on his age. */
+ * stay) and a year on his age. His form carries over, fading by the matchday as it always does. */
 export function nextSeason(career: CareerState, club: string | null): CareerState {
   const { review, player, season } = career;
   if (!review) throw new Error('The season is not over');
   if (club !== null && !review.offers.some((o) => o.club === club)) throw new Error(`No offer from ${club}`);
   const divisions = promote(season.leagues.map((l) => table(l)));
-  const world = churn({ ...career.world, divisions }, streamSeed(career.seed, season.number, STREAM.churn));
+  const world = withoutName(
+    churn(
+      { ...career.world, divisions },
+      streamSeed(career.seed, season.number, STREAM.churn),
+      player.look.name,
+    ),
+    player.look.name,
+  );
   const moved = club ?? player.club;
   const aged = age(trainingOf(player));
   return {
     ...career,
-    player: { ...player, ...aged, club: moved, stamina: STAMINA_MAX, form: [] },
+    player: { ...player, ...aged, club: moved, stamina: STAMINA_MAX },
     world,
     season: createSeason(career.seed, season.number + 1, world, moved),
     review: null,

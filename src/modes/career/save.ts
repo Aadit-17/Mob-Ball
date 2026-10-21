@@ -29,6 +29,7 @@ import {
   START_AGE,
   type CareerGoal,
   type CareerPlayer,
+  type CareerSub,
   type CareerSeason,
   type CareerState,
   type FixtureRecord,
@@ -38,13 +39,13 @@ import {
   type SeasonReview,
   type SeasonSummary,
 } from './career';
-import { CLUB_IDS, DIVISIONS, type CareerKnight, type Division, type World } from './clubs';
+import { CLUB_IDS, DIVISIONS, sameName, type CareerKnight, type Division, type World } from './clubs';
 import { FAME_MAX, HONOURS, type Honour } from './economy';
 import { FORM_KEEP, type FormEntry } from './form';
 import { promote } from './world';
 
 /** Where a career is saved, apart from every other mode. */
-export const CAREER_STORAGE_KEY = 'mobball.career.v1';
+export const CAREER_STORAGE_KEY = 'mobball.career.v2';
 
 type Raw = Record<string, unknown>;
 
@@ -109,10 +110,13 @@ function world(raw: unknown): World | null {
 
 function form(raw: unknown, from: number, to: number): FormEntry[] | null {
   if (!Array.isArray(raw) || raw.length > FORM_KEEP) return null;
-  const entries = raw.map((e) => {
+  const entries = raw.map((e): FormEntry | null => {
     const r = record(e);
-    return r && isInt(r.day, from, to) && isNum(r.residual, -10, 10)
-      ? { day: r.day, residual: r.residual }
+    if (!r || !isInt(r.day, from, to) || !isNum(r.residual, -10, 10)) return null;
+    // A part match keeps its share; a whole one leaves it out.
+    if (!('share' in r)) return { day: r.day, residual: r.residual };
+    return isNum(r.share, 0, 1) && r.share > 0 && r.share < 1
+      ? { day: r.day, residual: r.residual, share: r.share }
       : null;
   });
   if (!entries.every((e): e is FormEntry => e !== null)) return null;
@@ -126,7 +130,8 @@ function player(raw: unknown, number: number, today: number): CareerPlayer | nul
   const trained = levels(r.attributes);
   const wear = wearOf(r.wear);
   const guarded = strings(r.guarded);
-  const readings = form(r.form, number * MATCHDAYS, today);
+  // Form carries over from season to season.
+  const readings = form(r.form, 0, today);
   if (!face || !trained || !wear || !guarded || !readings) return null;
   if (!guarded.every((a) => (ATTRIBUTES as readonly string[]).includes(a)) || !unique(guarded)) return null;
   if (!isRole(r.position) || !isClub(r.club) || r.age !== START_AGE + number) return null;
@@ -183,7 +188,25 @@ function fixtureRecord(
     return null;
   const ratings = Object.fromEntries(entries) as Record<string, number>;
   if (r.motm !== null && !(typeof r.motm === 'string' && r.motm in ratings)) return null;
-  return { goals, ratings, motm: r.motm };
+  if (!Array.isArray(r.subs)) return null;
+  const subs = r.subs.map((x) => sub(x, on));
+  if (!subs.every((x): x is CareerSub => x !== null)) return null;
+  // At most the allowed changes a side, in the order made, and nobody comes on or goes off twice.
+  const perSide = ([0, 1] as const).every(
+    (side) => subs.filter((x) => x.side === side).length <= SUBS_ALLOWED,
+  );
+  const ordered = subs.every((x, i) => i === 0 || x.share >= (subs[i - 1]?.share ?? 0));
+  if (!perSide || !ordered || !unique(subs.flatMap((x) => [x.off, x.on]))) return null;
+  return { goals, ratings, motm: r.motm, subs };
+}
+
+function sub(raw: unknown, plays: (side: number, id: string) => boolean): CareerSub | null {
+  const r = record(raw);
+  if (!r || (r.side !== 0 && r.side !== 1) || typeof r.off !== 'string' || typeof r.on !== 'string')
+    return null;
+  if (r.off === r.on || !plays(r.side, r.off) || !plays(r.side, r.on)) return null;
+  if (!isInt(r.minute, 1, 90) || !isNum(r.share, 0, 1)) return null;
+  return { side: r.side, off: r.off, on: r.on, minute: r.minute, share: r.share };
 }
 
 function season(raw: unknown, seed: number, w: World, playerClub: string): CareerSeason | null {
@@ -291,6 +314,8 @@ function summary(raw: unknown, index: number): SeasonSummary | null {
   if (r?.season !== index || r.age !== START_AGE + index || !isClub(r.club) || !isDivision(r.division))
     return null;
   if (!isRole(r.position) || !isInt(r.finish, 1, LEAGUE_SIZE) || !isInt(r.apps, 0, MATCHDAYS)) return null;
+  if (!isInt(r.starts, 0, r.apps) || r.subOns !== r.apps - r.starts || !isInt(r.subOffs, 0, r.starts))
+    return null;
   if (![r.goals, r.assists, r.matchPoints, r.honourPoints].every((x) => isInt(x, 0, 10_000))) return null;
   if (!isInt(r.motm, 0, r.apps)) return null;
   if (r.apps === 0 ? r.average !== null : !isNum(r.average, MIN_RATING, MAX_RATING)) return null;
@@ -309,6 +334,9 @@ function summary(raw: unknown, index: number): SeasonSummary | null {
     position: r.position,
     finish: r.finish,
     apps: r.apps,
+    starts: r.starts,
+    subOns: r.subOns,
+    subOffs: r.subOffs,
     goals: r.goals as number,
     assists: r.assists as number,
     motm: r.motm,
@@ -336,6 +364,8 @@ export function normalizeCareer(raw: unknown): CareerState | null {
   const today = s.number * MATCHDAYS + Math.min(...s.leagues.map(currentMatchday));
   const me = player(r.player, s.number, today);
   if (!me) return null;
+  // No bot shares his name (see withoutName).
+  if (Object.values(w.squads).some((sq) => sq.some((k) => sameName(k.look.name, me.look.name)))) return null;
   const finished = today === (s.number + 1) * MATCHDAYS;
   const rev = r.review === null ? null : review(r.review, s, me.club);
   if ((r.review !== null && (!rev || !finished)) || !Array.isArray(r.history)) return null;

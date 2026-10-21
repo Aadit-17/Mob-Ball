@@ -364,6 +364,35 @@ export function freshName(rng: Rng, taken: ReadonlySet<string>): string {
   return rng.pick(free);
 }
 
+/** Names read the same whatever their case or the spaces around them. */
+export const sameName = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** `taken` and `name` in every spelling `freshName` could draw, so a new knight never takes it. */
+export const takenWith = (taken: Iterable<string>, name: string): Set<string> =>
+  new Set([...taken, name, ...CAREER_NAMES.filter((n) => sameName(n, name))]);
+
+/** The realm with no bot called `name` (the forged knight's): each one who is takes a fresh name from a stream of his
+ * own id, keeping his face, so nobody else changes and the same name always gives the same realm. */
+export function withoutName(world: World, name: string): World {
+  const clashes = Object.values(world.squads).some((s) => s.some((k) => sameName(k.look.name, name)));
+  if (!clashes) return world;
+  const taken = takenWith(
+    Object.values(world.squads).flatMap((s) => s.map((k) => k.look.name)),
+    name,
+  );
+  const rename = (k: CareerKnight): CareerKnight => {
+    if (!sameName(k.look.name, name)) return k;
+    const rng = createRng((CAREER_REALM_SEED + Math.imul(Number(k.id.slice(1)) + 1, 0x9e3779b1)) >>> 0);
+    const fresh = freshName(rng, taken);
+    taken.add(fresh);
+    return { ...k, look: { ...k.look, name: fresh } };
+  };
+  return {
+    ...world,
+    squads: Object.fromEntries(Object.entries(world.squads).map(([club, s]) => [club, s.map(rename)])),
+  };
+}
+
 /** A helmet none of `squad` wears, while one is left; helmets are unique within a club as in the realm. */
 export function freshHelmet(rng: Rng, squad: readonly SquadKnight[]): number {
   const free = HELMETS.map((_, i) => i).filter((i) => !squad.some((k) => k.look.helmet === i));

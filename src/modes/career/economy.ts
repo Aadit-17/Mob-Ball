@@ -10,11 +10,12 @@ export const POINT_FLOOR = 5.5;
 /** Points = scale × (rating − floor)², rounded: 6.8 earns 2, 7.5 earns 4, 8.0 earns 6, 9.0 earns 12. */
 export const POINT_SCALE = 1;
 
-/** Points for one match: convex in the rating, so a standout match is worth several ordinary ones. */
-export function matchPoints(rating: number): number {
-  if (!Number.isFinite(rating)) return 0;
+/** Points for one match: convex in the rating, so a standout match is worth several ordinary ones, and in proportion
+ * to the share of it he played (the rating is already judged per minute, so a cameo at 8.0 earns a third of a match). */
+export function matchPoints(rating: number, share = 1): number {
+  if (!Number.isFinite(rating) || !Number.isFinite(share)) return 0;
   const above = Math.max(0, rating - POINT_FLOOR);
-  return Math.round(POINT_SCALE * above * above);
+  return Math.round(POINT_SCALE * above * above * clamp(share, 0, 1));
 }
 
 export type Honour = 'title' | 'promotion' | 'topScorer' | 'royalCall' | 'royalCrown';
@@ -28,6 +29,10 @@ export const HONOUR_POINTS: Readonly<Record<Honour, Readonly<Record<Division, nu
   royalCall: { 0: 10, 1: 10, 2: 10 },
   royalCrown: { 0: 10, 1: 10, 2: 10 },
 };
+
+/** Appearances, starting or from the bench, a season's honours need to count for him: a title won from the stands
+ * isn't his. */
+export const TROPHY_MIN_APPS = 3;
 
 export const honourPoints = (honours: readonly Honour[], division: Division): number =>
   honours.reduce((sum, h) => sum + HONOUR_POINTS[h][division], 0);

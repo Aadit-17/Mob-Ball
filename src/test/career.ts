@@ -55,7 +55,7 @@ export function fakeMatchday(
         for (let g = 0; g < (side === 0 ? m.score[0] : m.score[1]); g++)
           goals.push({ side: side as 0 | 1, scorer, assist: null, ownGoal: false });
       });
-      const record: FixtureRecord = { goals, ratings, motm: null };
+      const record: FixtureRecord = { goals, ratings, motm: null, subs: [] };
       leagues = leagues.map((l, d) => (d === division ? recordResult(l, day, fixture.index, m.score) : l));
       records = records.map((div, d) =>
         d === division
