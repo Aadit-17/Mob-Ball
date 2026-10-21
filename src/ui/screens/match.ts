@@ -16,7 +16,7 @@ import { Effects } from '../../render/effects';
 import { setupCanvas } from '../../render/paint';
 import { MatchRenderer } from '../../render/renderer';
 import type { House } from '../../setup/houses';
-import { rateMatch } from '../../stats/ratings';
+import { rateMatch, ratingBreakdown, valueActions } from '../../stats/ratings';
 import { choice } from '../choice';
 import { button, h } from '../dom';
 import { dragToSwap } from '../drag';
@@ -601,6 +601,7 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
       ratings: rateMatch(runner.stats),
       stats: runner.stats,
     };
+    const valued = valueActions(result.stats);
     const [us, them] = result.score;
     const verdict = us > them ? 'Victory!' : us < them ? 'Defeat' : 'Draw';
     const scorers = h(
@@ -631,10 +632,15 @@ function runMatch(root: HTMLElement, app: AppContext, session: MatchSession): ()
         'div',
         { class: 'result-body' },
         goals.length ? scorers : h('p', { class: 'goalless', text: 'A goalless scrap.' }),
-        ratingsBoard(result.ratings, [homeHouse, awayHouse], (id) => {
-          const k = knightById(state, id);
-          return { name: k?.look.name ?? '', human: k?.human ?? false };
-        }),
+        ratingsBoard(
+          result.ratings,
+          [homeHouse, awayHouse],
+          (id) => {
+            const k = knightById(state, id);
+            return { name: k?.look.name ?? '', human: k?.human ?? false };
+          },
+          (id) => ratingBreakdown(result.stats, id, undefined, valued),
+        ),
       ),
       h(
         'div',

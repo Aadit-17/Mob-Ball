@@ -9,7 +9,10 @@ import { REALM_HOUSES } from '../setup/houses';
 import { rosterLineup } from '../setup/rosters';
 import { setTeamTier } from '../setup/squads';
 import { spec } from '../test/fixtures';
+import { humanInput } from '../test/humans';
 import { kickOnce, stage, walk } from '../test/stage';
+import { planFixture, playerFixture as careerFixture, startCareer } from '../modes/career/career';
+import { breakdownParts } from '../ui/ratings';
 import {
   BASE,
   MAX_RATING,
@@ -19,6 +22,7 @@ import {
   manOfTheMatch,
   outcomeCredit,
   rateMatch,
+  ratingBreakdown,
   ratingsFrom,
   scoreOf,
   standardise,
@@ -438,29 +442,33 @@ describe('the rating scale', () => {
 describe('outcome credit', () => {
   const { outcome } = RATING_MODEL;
   const full = REGULATION_STEPS;
-  const none = { goals: 0, assists: 0, ownGoals: 0, cleanSheet: false };
+  const none = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false };
   const fwd = steps({ fwd: full });
   const gk = steps({ gk: full });
 
-  it('is calibrated to give a goal real weight, an assist half of it and an own goal the same cost', () => {
-    // The harness fits these to a goal lifting a forward by 0.8 in all; the outcome share is about 0.2.
-    expect(outcome.goal).toBeGreaterThan(0.1);
-    expect(outcome.goal).toBeLessThan(0.5);
+  it('is calibrated to give a goal real weight, an assist half of it, an own goal the same cost, a save weight', () => {
+    // The harness fits the goal so a forward's single goal reads 7.3; it comes to about three quarters of a point.
+    expect(outcome.goal).toBeGreaterThan(0.5);
+    expect(outcome.goal).toBeLessThan(1);
     expect(outcome.assist).toBeCloseTo(outcome.goal / 2, 3);
     expect(outcome.ownGoal).toBe(outcome.goal);
+    expect(outcome.save).toBeGreaterThan(0);
     expect(RATING_MODEL.motmMargin).toBe(0.5);
   });
 
-  it('lifts an otherwise equal knight by the calibrated amount for each goal and assist, and sinks him for an own goal', () => {
+  it('lifts an otherwise equal knight by the calibrated amount for each goal, assist and save, and sinks him for an own goal', () => {
     const at = (o: Partial<typeof none>) => scoreOf(0.3, { ...none, ...o }, fwd, RATING_MODEL);
     expect(at({ goals: 1 }) - at({})).toBeCloseTo(outcome.goal, 9);
     expect(at({ goals: 2 }) - at({})).toBeCloseTo(2 * outcome.goal, 9);
     expect(at({ goals: 3 }) - at({ goals: 2 })).toBeCloseTo(outcome.goal, 9);
     expect(at({ assists: 1 }) - at({})).toBeCloseTo(outcome.assist, 9);
     expect(at({ ownGoals: 1 }) - at({})).toBeCloseTo(-outcome.ownGoal, 9);
+    const keeper = (o: Partial<typeof none>) => scoreOf(0, { ...none, ...o }, gk, RATING_MODEL);
+    expect(keeper({ saves: 2 }) - keeper({})).toBeCloseTo(2 * outcome.save, 9);
     // A clean sheet never costs a keeper, and counts only for his time in goal.
-    expect(scoreOf(0, { ...none, cleanSheet: true }, gk, RATING_MODEL)).toBeGreaterThanOrEqual(
-      scoreOf(0, none, gk, RATING_MODEL),
+    expect(keeper({ cleanSheet: true }) - keeper({})).toBeCloseTo(outcome.cleanSheet, 9);
+    expect(scoreOf(0, { ...none, cleanSheet: true }, steps({ gk: full / 2 }), RATING_MODEL)).toBeLessThan(
+      scoreOf(0, { ...none, cleanSheet: true }, gk, RATING_MODEL) + outcome.cleanSheet,
     );
   });
 
@@ -474,11 +482,127 @@ describe('outcome credit', () => {
     expect(forward).toBeGreaterThan(defender);
   });
 
-  it('measures outcomes over par, so a position with no outcomes on the day sits below its usual', () => {
-    const par = outcomeCredit(none, fwd, RATING_MODEL);
-    expect(par).toBeLessThan(0);
-    expect(outcomeCredit({ ...none, goals: 1 }, fwd, RATING_MODEL)).toBeCloseTo(par + outcome.goal, 9);
-    expect(outcomeCredit(none, steps({}), RATING_MODEL)).toBe(0);
+  it('counts a goal in full whoever scores it: no par of goals is taken off a forward', () => {
+    expect(outcomeCredit(none, fwd, RATING_MODEL)).toBe(0);
+    expect(outcomeCredit({ ...none, goals: 1 }, fwd, RATING_MODEL)).toBeCloseTo(outcome.goal, 9);
+    expect(outcomeCredit({ ...none, goals: 1 }, steps({ def: full }), RATING_MODEL)).toBeCloseTo(
+      outcome.goal,
+      9,
+    );
+  });
+
+  it("reads an ordinary match (his position's par, nothing decisive) 6.45, and a match of no worth about 6.0", () => {
+    const { roles } = RATING_MODEL;
+    for (const role of ['def', 'mid', 'fwd'] as const) {
+      const whole = steps({ [role]: full });
+      expect(scoreOf(roles[role].mean, none, whole, RATING_MODEL)).toBeCloseTo(6.45, 6);
+      const nothing = scoreOf(0, none, whole, RATING_MODEL);
+      expect(nothing).toBeGreaterThanOrEqual(6 - 1e-3);
+      expect(nothing).toBeLessThan(6.1);
+    }
+  });
+
+  it('a forward who does a little worse than par and scores still reads 7 or so; a dominant midfielder still beats him', () => {
+    const { roles } = RATING_MODEL;
+    const scorer = scoreOf(roles.fwd.mean - 0.5 * roles.fwd.sd, { ...none, goals: 1 }, fwd, RATING_MODEL);
+    expect(scorer).toBeGreaterThan(6.8);
+    expect(scorer).toBeLessThan(7.3);
+    const poor = scoreOf(roles.fwd.mean - roles.fwd.sd, { ...none, goals: 1 }, fwd, RATING_MODEL);
+    const dominant = scoreOf(roles.mid.mean + 1.5 * roles.mid.sd, none, steps({ mid: full }), RATING_MODEL);
+    expect(dominant).toBeGreaterThan(poor);
+  });
+});
+
+describe('a possession change', () => {
+  it('shares its swing between the two in the duel: what the loser is charged, the winner earns', () => {
+    let duels = 0;
+    for (const stats of REAL) {
+      const actions = valueActions(stats);
+      const won = new Map(
+        actions
+          .filter((a) => ['tackle', 'interception', 'recovery', 'scramble'].includes(a.kind))
+          .map((a) => [a.step, a]),
+      );
+      for (const loss of actions.filter((a) => a.kind === 'loss' && a.value < 0)) {
+        const win = won.get(loss.step);
+        if (!win) continue;
+        expect(win.value + loss.value, `step ${loss.step}`).toBeCloseTo(0, 12);
+        duels++;
+      }
+    }
+    expect(duels).toBeGreaterThan(100);
+  });
+
+  it('only goes under 6 for a net minus: value below nothing, or an own goal', () => {
+    for (const stats of REAL)
+      for (const k of rateMatch(stats).knights)
+        if (k.score < 5.95)
+          expect(k.value < 0 || (stats.knights.find((q) => q.id === k.id)?.ownGoals ?? 0) > 0).toBe(true);
+  });
+});
+
+describe('the human in My Career', () => {
+  // The owner's report: a human who scored and won the ball over and over rated about 6, whatever he did.
+  // Before the fix these four rated 5.43, 6.39, 5.64 and 5.62; won balls high up earned nothing, every
+  // lost one cost the whole swing, and a forward's goal earned only what it beat his position's par by.
+  it('rates a forward who scores and keeps winning the ball well above 6.5', { timeout: 60_000 }, () => {
+    for (const seed of [4, 6, 7, 10]) {
+      const career = startCareer({ seed, look: DEFAULT_LOOK, position: 'fwd' });
+      const ref = careerFixture(career);
+      if (!ref) throw new Error('no fixture');
+      const runner = new MatchRunner(planFixture(career, ref, 'play').config());
+      while (!runner.ended) {
+        runner.advanceOne((k) => (k.human ? humanInput('improver', runner.state, k) : null));
+        runner.state.events = [];
+      }
+      const me = runner.state.knights.find((k) => k.human);
+      const line = runner.stats.knights.find((k) => k.id === me?.id);
+      if (!me || !line) throw new Error('no human');
+      expect(line.goals, `seed ${seed}`).toBe(1);
+      expect(line.tackles + line.interceptions + line.recoveries, `seed ${seed}`).toBeGreaterThanOrEqual(8);
+      expect(ratingOf(rateMatch(runner.stats), me.id), `seed ${seed}`).toBeGreaterThan(6.5);
+    }
+  });
+});
+
+describe('the rating breakdown', () => {
+  it('adds up, base and every line, to the rating before the clamp, for every knight', () => {
+    for (const stats of REAL) {
+      const ratings = rateMatch(stats);
+      for (const k of ratings.knights) {
+        const b = ratingBreakdown(stats, k.id);
+        if (!b) throw new Error(`no breakdown for ${k.id}`);
+        expect(b.score).toBeCloseTo(k.score, 9);
+        expect(b.rating).toBe(k.rating);
+        expect(b.base + b.lines.reduce((sum, l) => sum + l.points, 0)).toBeCloseTo(k.score, 9);
+        // The base is a match of no worth for his roles and minutes: everything he did is in a line.
+        const line = stats.knights.find((q) => q.id === k.id);
+        if (!line) throw new Error('no line');
+        const nothing = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false };
+        expect(b.base).toBeCloseTo(scoreOf(0, nothing, line.roleSteps, RATING_MODEL), 9);
+      }
+    }
+  });
+
+  it('shows parts to one decimal that sum to the rating shown, with any rounding or cap said out loud', () => {
+    for (const stats of REAL)
+      for (const k of rateMatch(stats).knights) {
+        const b = ratingBreakdown(stats, k.id);
+        if (!b) throw new Error('no breakdown');
+        const parts = breakdownParts(b);
+        const sum = parts.reduce((total, p) => total + Number(p.value.replace('−', '-')), 0);
+        expect(sum).toBeCloseTo(Math.round(k.rating * 10) / 10, 6);
+      }
+  });
+
+  it("names a goal's credit under Goals and a clean sheet under its own line", () => {
+    const stats = REAL.find((st) => st.knights.some((k) => k.goals > 0));
+    const scorer = stats?.knights.find((k) => k.goals > 0);
+    if (!stats || !scorer) throw new Error('no scorer');
+    const goals = ratingBreakdown(stats, scorer.id)?.lines.find((l) => l.label === 'Goals');
+    expect(goals?.count).toBe(`×${scorer.goals}`);
+    expect(goals?.points).toBeGreaterThan(RATING_MODEL.outcome.goal * scorer.goals);
+    expect(ratingBreakdown(stats, 999)).toBeNull();
   });
 });
 
@@ -505,13 +629,11 @@ describe('man of the match', () => {
 describe('position fairness (the harness checks this on 800 matches)', () => {
   it('gives each position a similar centre and spread', { timeout: 60_000 }, () => {
     const byRole = new Map<Role, number[]>();
-    const credit = new Map<Role, number[]>();
     for (let i = 0; i < 30; i++) {
       const tier = i % 5;
       const stats = played(fixture(700 + i, [tier, Math.min(4, tier + (i % 2))])).stats;
       for (const k of rateMatch(stats).knights) {
         byRole.set(k.role, [...(byRole.get(k.role) ?? []), k.rating]);
-        credit.set(k.role, [...(credit.get(k.role) ?? []), k.outcome]);
       }
     }
     const all = [...byRole.values()].flat();
@@ -524,8 +646,6 @@ describe('position fairness (the harness checks this on 800 matches)', () => {
       expect(Math.abs(mean(xs) - mean(all)), role).toBeLessThan(0.45);
       expect(sd(xs) / sd(all), role).toBeGreaterThan(0.6);
       expect(sd(xs) / sd(all), role).toBeLessThan(1.5);
-      // Outcomes are measured over par: on average they add nothing to any position.
-      expect(Math.abs(mean(credit.get(role) ?? [])), role).toBeLessThan(0.12);
     }
   });
 });
@@ -538,11 +658,11 @@ const golden = (stats: MatchStats): string => {
 };
 
 const GOLDEN: Readonly<Record<number, string>> = {
-  1: '2-0 | 0gk:7.41 1def:8.15 2mid:6.33 3fwd:6.41 4gk:6.78 5def:6.24 6mid:6.49 7fwd:6.62 | motm 1',
-  3: '3-4 | 0gk:6.23 1def:7.62 2mid:5.66 3fwd:8.37 4gk:6.80 5def:7.44 6mid:8.10 7fwd:8.24 | motm 7',
-  5: '3-2 | 0gk:6.81 1def:5.93 2mid:8.12 3fwd:6.61 4gk:7.17 5def:6.28 6mid:6.41 7fwd:7.00 | motm 2',
-  7: '1-3 | 0gk:5.43 1def:5.52 2mid:6.48 3fwd:7.31 4gk:6.54 5def:8.22 6mid:6.83 7fwd:7.83 | motm 5',
-  9: '0-3 | 0gk:5.86 1def:6.16 2mid:6.71 3fwd:6.48 4gk:7.14 5def:5.19 6mid:9.23 7fwd:7.43 | motm 6',
+  1: '2-0 | 0gk:7.30 1def:8.79 2mid:6.50 3fwd:6.13 4gk:7.41 5def:6.10 6mid:6.27 7fwd:6.34 | motm 1',
+  3: '3-4 | 0gk:6.62 1def:7.84 2mid:5.76 3fwd:8.63 4gk:7.04 5def:6.77 6mid:8.56 7fwd:8.97 | motm 7',
+  5: '3-2 | 0gk:7.07 1def:6.00 2mid:8.73 3fwd:7.87 4gk:7.77 5def:6.18 6mid:6.97 7fwd:7.59 | motm 2',
+  7: '1-3 | 0gk:5.78 1def:5.94 2mid:7.12 3fwd:7.18 4gk:6.36 5def:6.69 6mid:7.30 7fwd:8.21 | motm 7',
+  9: '0-3 | 0gk:5.90 1def:6.07 2mid:6.26 3fwd:6.29 4gk:7.16 5def:6.19 6mid:8.94 7fwd:7.98 | motm 6',
 };
 
 describe('golden matches', () => {

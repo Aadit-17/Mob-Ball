@@ -1,6 +1,6 @@
 // Match ratings in two parts. Process: every action is worth the change it made in how likely each side
 // was to score next (the fitted value model), against what his position usually earns in that time.
-// Outcome: goals, assists, own goals and clean sheets, which decide matches, on top. Pure and replayable.
+// Outcome: goals, assists, own goals, saves and clean sheets, counted in full, on top. Pure, replayable.
 import { MATCH, STEP } from '../game/constants';
 import type { Role, TeamId } from '../game/types';
 import { POSSESSION_HOLD, rivalOf } from './definitions';
@@ -42,16 +42,10 @@ export interface ValuedAction {
   readonly value: number;
 }
 
-/** What a position earns over a full match: its process value's centre and spread, and its outcomes. */
+/** What a position's process value comes to over a full match: the par it is measured from, and its spread. */
 export interface RoleNorm {
   readonly mean: number;
   readonly sd: number;
-  /** Per full match in the role, the par the outcome credit is measured against. */
-  readonly goals: number;
-  readonly assists: number;
-  readonly ownGoals: number;
-  /** For keepers, the share of matches kept clean; 0 elsewhere. */
-  readonly cleanSheets: number;
 }
 
 /** Rating points for each decisive outcome (a clean sheet scaled by his share of the match in goal). */
@@ -59,13 +53,15 @@ export interface OutcomeWeights {
   readonly goal: number;
   readonly assist: number;
   readonly ownGoal: number;
+  /** A keeper's save of a shot that was going in: his goal. */
+  readonly save: number;
   readonly cleanSheet: number;
 }
 
 export interface RatingModel {
   readonly value: ValueModel;
   readonly roles: Readonly<Record<Role, RoleNorm>>;
-  /** Rating = BASE + lift + spread × standardised value + outcome credit over par. */
+  /** Rating = BASE + lift + spread × standardised value + outcome credit. */
   readonly lift: number;
   readonly spread: number;
   readonly outcome: OutcomeWeights;
@@ -78,6 +74,7 @@ export interface Outcomes {
   readonly goals: number;
   readonly assists: number;
   readonly ownGoals: number;
+  readonly saves: number;
   /** Kept goal and let nothing in while there. */
   readonly cleanSheet: boolean;
 }
@@ -93,7 +90,7 @@ export interface KnightRating {
   readonly score: number;
   /** Summed action value. */
   readonly value: number;
-  /** Rating points from outcomes, over his position's par. */
+  /** Rating points from outcomes. */
   readonly outcome: number;
 }
 
@@ -210,11 +207,13 @@ export function valueActions(stats: MatchStats, model: ValueModel = RATING_MODEL
       piece = begin(owner, t, kickedAt(t, owner));
       continue;
     }
-    // A rival took it. The loser's action is valued up to the touch and charged what losing it cost;
-    // the winner earns the danger he removed, credited where the log credits the win (a barge's author).
+    // A rival took it. The swing is shared by the two in the duel: half charged to the loser, half earned by
+    // the winner (as the log credits him: a barge's author), counted once. A stopped shot is the stopper's
+    // whole: the chance he stopped, as the charge for a goal he lets in is the chance he didn't.
     const lost = piece.team;
     close(piece, value(t - 1, lost), t - 1);
-    emit(piece.knightId, 'loss', t, Math.min(0, value(t, lost) - value(t - 1, lost)));
+    const swing = value(t, lost) - value(t - 1, lost);
+    emit(piece.knightId, 'loss', t, Math.min(0, swing / 2));
     const removed = chance(t - 1, lost) - chance(t, lost);
     const shot = kickAt(piece.kickStep, piece.knightId);
     const credit = (defence.get(t) ?? []).find((a) => a.team !== lost);
@@ -225,8 +224,8 @@ export function valueActions(stats: MatchStats, model: ValueModel = RATING_MODEL
         t,
         Math.max(0, removed),
       );
-    else if (credit) emit(credit.knightId, credit.kind, t, Math.max(0, removed));
-    else emit(owner, 'scramble', t, removed);
+    else if (credit) emit(credit.knightId, credit.kind, t, Math.max(0, -swing / 2));
+    else emit(owner, 'scramble', t, -swing / 2);
     piece = begin(owner, t, kickedAt(t, owner));
   }
   if (piece) close(piece, value(cells.length - 1, piece.team), cells.length - 1);
@@ -309,8 +308,15 @@ export function standardise(
   const played = ROLES.reduce((s, r) => s + share(r), 0);
   if (played <= 0) return 0;
   const par = ROLES.reduce((s, r) => s + share(r) * roles[r].mean, 0);
+  return (value - par) / yardstick(roleSteps, roles);
+}
+
+/** What one unit of z is in value for his time in each role (see standardise). */
+function yardstick(roleSteps: KnightStats['roleSteps'], roles: Readonly<Record<Role, RoleNorm>>): number {
+  const share = (r: Role): number => roleSteps[r] / REGULATION_STEPS;
+  const played = ROLES.reduce((s, r) => s + share(r), 0);
   const spread = ROLES.reduce((s, r) => s + share(r) * roles[r].sd ** 2, 0);
-  return (value - par) / Math.sqrt(spread * Math.max(1, MIN_SHARE / played));
+  return Math.sqrt(spread * Math.max(1, MIN_SHARE / Math.max(played, 1e-9)));
 }
 
 export const toRating = (score: number): number => Math.min(MAX_RATING, Math.max(MIN_RATING, score));
@@ -319,26 +325,15 @@ export const outcomesOf = (k: KnightStats): Outcomes => ({
   goals: k.goals,
   assists: k.assists,
   ownGoals: k.ownGoals,
+  saves: k.saves,
   cleanSheet: k.roleSteps.gk > 0 && k.goalsConceded === 0,
 });
 
-// Outcomes over par: a position's usual goals (or clean sheets) for his time are taken off, so every
-// position keeps the same centre and a forward who doesn't score sits below one who does.
+/** Rating points for what decided the match: every goal (and every save) counts in full, whoever makes it. */
 export function outcomeCredit(o: Outcomes, roleSteps: KnightStats['roleSteps'], model: RatingModel): number {
   const w = model.outcome;
-  const share = (r: Role): number => roleSteps[r] / REGULATION_STEPS;
-  const par = ROLES.reduce((sum, r) => {
-    const n = model.roles[r];
-    const usual =
-      w.goal * n.goals + w.assist * n.assists - w.ownGoal * n.ownGoals + w.cleanSheet * n.cleanSheets;
-    return sum + share(r) * usual;
-  }, 0);
-  const got =
-    w.goal * o.goals -
-    w.ownGoal * o.ownGoals +
-    w.assist * o.assists +
-    (o.cleanSheet ? w.cleanSheet * share('gk') : 0);
-  return got - par;
+  const sheet = o.cleanSheet ? w.cleanSheet * Math.min(1, roleSteps.gk / REGULATION_STEPS) : 0;
+  return w.goal * o.goals + w.assist * o.assists - w.ownGoal * o.ownGoals + w.save * o.saves + sheet;
 }
 
 /** A rating before clamping, from summed action value, outcomes and time in each role. */
@@ -401,3 +396,123 @@ export function manOfTheMatch(
   if (!best) return loser?.id ?? null;
   return loser && loser.score >= best.score + margin ? loser.id : best.id;
 }
+
+/** One line of what made a rating: a group of actions, how many, and the rating points they came to. */
+export interface BreakdownLine {
+  readonly label: string;
+  /** How many, as shown: "×3", or "7/9" for passes completed of passes. */
+  readonly count: string;
+  readonly points: number;
+}
+
+export interface RatingBreakdown {
+  /** What a match of no worth, for good or ill, rates for his roles and minutes. */
+  readonly base: number;
+  readonly lines: readonly BreakdownLine[];
+  /** base + every line: the rating before the 3–10 clamp. */
+  readonly score: number;
+  readonly rating: number;
+}
+
+type Group =
+  | 'goals'
+  | 'assists'
+  | 'shots'
+  | 'passes'
+  | 'carries'
+  | 'won'
+  | 'saves'
+  | 'blocks'
+  | 'clearances'
+  | 'lost'
+  | 'ownGoals'
+  | 'conceded'
+  | 'cleanSheet';
+
+const GROUP_OF: Readonly<Record<ValueKind, Group>> = {
+  goal: 'goals',
+  assist: 'assists',
+  shot: 'shots',
+  pass: 'passes',
+  carry: 'carries',
+  kick: 'carries',
+  clearance: 'clearances',
+  tackle: 'won',
+  interception: 'won',
+  recovery: 'won',
+  scramble: 'won',
+  save: 'saves',
+  claim: 'saves',
+  block: 'blocks',
+  loss: 'lost',
+  ownGoal: 'ownGoals',
+  conceded: 'conceded',
+};
+
+const GROUP_LABEL: Readonly<Record<Group, string>> = {
+  goals: 'Goals',
+  assists: 'Assists',
+  shots: 'Shots',
+  passes: 'Passes',
+  carries: 'On the ball',
+  won: 'Won the ball',
+  saves: 'Saves',
+  blocks: 'Blocks',
+  clearances: 'Clearances',
+  lost: 'Lost the ball',
+  ownGoals: 'Own goals',
+  conceded: 'Goals conceded',
+  cleanSheet: 'Clean sheet',
+};
+
+// What made a knight's rating, in rating points: each action's value through the same scale as the rating,
+// and each outcome's weight, grouped. The base and the lines add up to the score exactly.
+export function ratingBreakdown(
+  stats: MatchStats,
+  knightId: number,
+  model: RatingModel = RATING_MODEL,
+  actions: readonly ValuedAction[] = valueActions(stats, model.value),
+): RatingBreakdown | null {
+  const k = stats.knights.find((q) => q.id === knightId);
+  if (!k || k.playedSteps === 0) return null;
+  const unit = model.spread / yardstick(k.roleSteps, model.roles);
+  const o = outcomesOf(k);
+  const w = model.outcome;
+  const points = new Map<Group, number>();
+  const add = (g: Group, p: number): void => {
+    points.set(g, (points.get(g) ?? 0) + p);
+  };
+  for (const a of actions) if (a.knightId === knightId) add(GROUP_OF[a.kind], unit * a.value);
+  if (o.goals) add('goals', w.goal * o.goals);
+  if (o.assists) add('assists', w.assist * o.assists);
+  if (o.ownGoals) add('ownGoals', -w.ownGoal * o.ownGoals);
+  if (o.saves) add('saves', w.save * o.saves);
+  const sheet = outcomeCredit({ ...o, goals: 0, assists: 0, ownGoals: 0, saves: 0 }, k.roleSteps, model);
+  if (sheet) add('cleanSheet', sheet);
+  const lost = actions.filter((a) => a.knightId === knightId && a.kind === 'loss').length;
+  const counts: Readonly<Record<Group, string>> = {
+    goals: `×${k.goals}`,
+    assists: `×${k.assists}`,
+    shots: `×${k.shots}`,
+    passes: `${k.passesCompleted}/${k.passes}`,
+    carries: '',
+    won: `×${k.tackles + k.interceptions + k.recoveries}`,
+    saves: `×${k.saves + k.claims}`,
+    blocks: `×${k.blocks}`,
+    clearances: `×${k.clearances}`,
+    lost: `×${lost}`,
+    ownGoals: `×${k.ownGoals}`,
+    conceded: `×${k.goalsConceded}`,
+    cleanSheet: '',
+  };
+  const lines = (Object.keys(GROUP_LABEL) as Group[]).flatMap((g) => {
+    const p = points.get(g);
+    return p === undefined ? [] : [{ label: GROUP_LABEL[g], count: counts[g], points: p }];
+  });
+  const score = scoreOf(totalValue(actions, knightId), o, k.roleSteps, model);
+  const base = score - lines.reduce((sum, l) => sum + l.points, 0);
+  return { base, lines, score, rating: toRating(score) };
+}
+
+const totalValue = (actions: readonly ValuedAction[], id: number): number =>
+  actions.reduce((sum, a) => (a.knightId === id ? sum + a.value : sum), 0);

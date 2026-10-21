@@ -15,15 +15,14 @@ import { rosterLineup } from '../src/setup/rosters';
 import { setTeamTier } from '../src/setup/squads';
 import {
   BASE,
+  REGULATION_STEPS,
   manOfTheMatch,
-  outcomeCredit,
   outcomesOf,
   ratingsFrom,
   scoreOf,
   standardise,
   toRating,
   valueActions,
-  type OutcomeWeights,
   type Outcomes,
   type RatingModel,
   type RoleNorm,
@@ -34,6 +33,9 @@ import type { KnightStats, MatchStats } from '../src/stats/types';
 import { CELLS, FATES, FEATURES, NO_CELL, unpackCell, type ValueModel } from '../src/stats/value';
 import { RATING_MODEL } from '../src/stats/value-model';
 import { spec } from '../src/test/fixtures';
+import { humanInput, HUMAN_PROFILES, type HumanProfile } from '../src/test/humans';
+import { TOP_TIER } from '../src/ai/skills';
+import type { KnightSpec } from '../src/game/match';
 
 /** Matches the value model learns from: 3 in 5 to fit, 1 in 5 to choose the smoothing, 1 in 5 to test. */
 const FIT_MATCHES = 2000;
@@ -50,19 +52,20 @@ const HORIZON_COVER = 0.9;
 const SAMPLE_EVERY = 12;
 /** Smoothing strengths tried, in samples: each cell leans on its coarser parent with this weight. */
 const ALPHAS = [1, 3, 10, 30, 100, 300, 1000, 3000] as const;
-/** The middle 60% of ratings should read 6.0 to 7.5: a typical match, as the plan asks. */
-const TYPICAL = { low: 0.2, high: 0.8, from: 6, to: 7.5 } as const;
-// Outcome credit, calibrated to stated targets rather than feel. A goal should lift a forward by the middle
-// of the 0.6–1.0 band the owner set (today's process value alone gives about 0.6); an assist is worth
-// half a goal (the usual football-ratings split) and an own goal mirrors a goal. A clean sheet keeps the
-// keeper where process value already puts him (7.5 on average). The margin: see MOTM_MARGIN.
-const GOAL_LIFT = 0.8;
+// The scale, fitted to stated targets rather than feel (the owner's, after playing My Career). An ordinary
+// match, his position's par with nothing decisive, reads 6.45 (a quiet match is 6.3–6.6); a match of no
+// worth at all, for good or ill, reads 6.0, so only a net minus goes under 6; a forward's single goal
+// reads 7.3 between a one-goal defeat and a win (so both land in the asked 6.8–7.3 and 7.3–7.6). A keeper's save of a goalbound shot
+// is his goal, weighted so keepers average what outfielders do, and a clean sheet averages 7.5 (as before).
+// An assist is worth half a goal, an own goal costs a goal.
+const TARGET = { ordinary: 6.45, nothing: 6, oneGoal: 7.3, cleanSheet: 7.5 } as const;
 const ASSIST_SHARE = 0.5;
-const CLEAN_SHEET_RATING = 7.5;
-// A loser must out-rate the winners' best by half a point to take man of the match: more than half a
-// goal's lift, so a decisive goal outweighs a busier match on the losing side, but a clearly better one
-// still wins it.
+// A loser must out-rate the winners' best by half a point to take man of the match: a decisive goal
+// outweighs a busier match on the losing side, but a clearly better one still wins it.
 const MOTM_MARGIN = 0.5;
+/** Matches per human profile and position, the human in the home side at the Knight tier. */
+const HUMAN_MATCHES = 40;
+const FIRST_HUMAN_SEED = 80_000;
 const BOOTSTRAPS = 200;
 /** A league season's matches, for how steady an average rating is. */
 const SEASON = 14;
@@ -74,33 +77,38 @@ const CHECKS = {
   /** The value model must beat knowing nothing about the state, on matches it never saw. */
   minLogLossGain: 0.05,
   /** Each position's mean rating within this of the overall mean; spreads may differ (forwards peak higher). */
-  roleMeanBand: 0.2,
-  roleSpreadBand: [0.8, 1.3],
-  /** The middle 60%: 6.0–7.5 give or take this. */
-  typicalBand: 0.15,
-  /** A standout (top 5%) match lands at 8–9. */
-  standout: [7.9, 9.1],
+  roleMeanBand: 0.3,
+  roleSpreadBand: [0.7, 1.4],
+  /** The average rating sits about where football ratings do. */
+  mean: [6.6, 7.0],
+  /** A standout (top 5%) match lands at 8–9 or a little more. */
+  standout: [7.9, 9.3],
   /** A side's mean rating must follow its goal difference. */
   minTeamGoalDiffCorrelation: 0.6,
-  /** A goal lifts a forward by 0.6–1.0 (the slope of his rating on his goals). */
-  goalLift: [0.6, 1.0],
-  /** A winning side's two-goal scorer usually lands around 8; a hat-trick above that. */
-  braceMedian: [7.6, 8.6],
+  /** Medians, on matches the scale never saw: a forward's goal in a one-goal defeat, one in a win, a winning brace. */
+  goalInDefeat: [6.8, 7.3],
+  goalInWin: [7.3, 7.7],
+  braceInWin: [7.9, 8.6],
+  minHatTrick: 8.7,
   /** Man of the match on the winning side as often as in football. */
   minMotmWinShare: 0.85,
   /** Keepers still win it sometimes, and no more often than their quarter of the pitch. */
   keeperMotmShare: [0.02, 0.3],
   minCleanSheetMean: 7.3,
-  /** Process value still carries most of a rating, so it never becomes a goal count. */
-  minProcessShare: 0.6,
-  /** A goalless defender out-rates a winning brace scorer in at most this share of such matches. */
-  maxDefenderOverBrace: 0.15,
+  /** Process value still decides between knights: a goalless midfielder 1.5 spreads above par beats a
+   * one-goal forward a spread below his, in the same match, at least this often. */
+  minDominantOverPoorScorer: 0.9,
+  /** Scripted human play: a beginner's typical match 6.2–7.0, his good one (scored, won the ball 3+) 7+. */
+  beginnerMedian: [6.2, 7.0],
+  minBeginnerGood: 7.0,
 } as const;
 
 interface Job {
   readonly seed: number;
   readonly tiers: readonly [number, number];
   readonly changes: boolean;
+  /** A scripted human in the home side's knight in this role ('bot': the same slot left to the bot). */
+  readonly human?: { readonly profile: HumanProfile | 'bot'; readonly role: Role };
 }
 
 type Task =
@@ -127,6 +135,9 @@ interface KnightRow {
   readonly conceded: number;
   readonly goals: number;
   readonly outcomes: Outcomes;
+  /** Balls won (tackles, interceptions, recoveries) and shots on target. */
+  readonly won: number;
+  readonly onTarget: number;
   readonly rating: number;
   readonly score: number;
 }
@@ -154,12 +165,17 @@ function jobs(count: number, first: number, changesEvery = 0): Job[] {
   }));
 }
 
-function fixture({ seed, tiers, changes }: Job): { config: FixtureConfig; scheduled: TimedAction[] } {
+function fixture({ seed, tiers, changes, human }: Job): { config: FixtureConfig; scheduled: TimedAction[] } {
   const home = REALM_HOUSES[seed % REALM_HOUSES.length];
   const away = REALM_HOUSES[(seed + 3) % REALM_HOUSES.length];
   if (!home || !away) throw new Error('No houses');
+  // The human as My Career fields him: top tier on paper (the decent player is the brain at the match's tier).
+  const asHuman = (s: KnightSpec): KnightSpec =>
+    human && human.profile !== 'bot' && s.role === human.role
+      ? { ...s, human: true, tier: human.profile === 'decent' ? tiers[0] : TOP_TIER, speedFactor: 1 }
+      : s;
   const config: FixtureConfig = {
-    home: setTeamTier(rosterLineup(home, 4), tiers[0]),
+    home: setTeamTier(rosterLineup(home, 4), tiers[0]).map(asHuman),
     away: setTeamTier(rosterLineup(away, 4), tiers[1]),
     seed,
     draws: !changes || seed % 2 === 0,
@@ -180,7 +196,15 @@ function fixture({ seed, tiers, changes }: Job): { config: FixtureConfig; schedu
 function play(job: Job): MatchStats {
   const { config, scheduled } = fixture(job);
   const runner = new MatchRunner(config, scheduled);
-  runner.advance(Infinity);
+  const profile = job.human?.profile;
+  while (!runner.ended) {
+    runner.advanceOne(
+      profile && profile !== 'bot'
+        ? (k) => (k.human ? humanInput(profile, runner.state, k) : null)
+        : undefined,
+    );
+    runner.state.events = [];
+  }
   return runner.stats;
 }
 
@@ -287,6 +311,8 @@ function rate(job: Job, model: RatingModel): RateRow {
         conceded: k.goalsConceded,
         goals: k.goals,
         outcomes: outcomesOf(k),
+        won: k.tackles + k.interceptions + k.recoveries,
+        onTarget: k.shotsOnTarget,
         rating: r?.rating ?? 0,
         score: r?.score ?? 0,
       };
@@ -577,6 +603,8 @@ function scored(rows: readonly RateRow[], model: RatingModel) {
 
 const won = (r: RateRow, team: TeamId): boolean => r.score[team] > r.score[team === 0 ? 1 : 0];
 
+const lostByOne = (r: RateRow, team: TeamId): boolean => r.score[team === 0 ? 1 : 0] - r.score[team] === 1;
+
 /** Least-squares slope of a forward's rating on his goals: what one goal is worth to him. */
 function goalLift(rows: readonly RateRow[], model: RatingModel): number {
   const fwds = scored(rows, model).flatMap((m) => m.knights.filter(({ k }) => k.whole && k.role === 'fwd'));
@@ -587,36 +615,57 @@ function goalLift(rows: readonly RateRow[], model: RatingModel): number {
   return cov / xs.reduce((a, x) => a + (x - mx) ** 2, 0);
 }
 
-/** The targets the outcome weights are checked against, on any set of rows. */
+/** In matches with both, how often a goalless midfielder well above par out-rates a one-goal forward below his. */
+function dominance(ms: ReturnType<typeof scored>, model: RatingModel): number {
+  const z = (k: KnightRow) => standardise(k.value, k.roleSteps, model.roles);
+  let [pairs, wins] = [0, 0];
+  for (const m of ms) {
+    const mids = m.knights.filter(
+      ({ k }) => k.whole && k.role === 'mid' && k.goals + k.outcomes.assists === 0 && z(k) >= 1.5,
+    );
+    const fwds = m.knights.filter(({ k }) => k.whole && k.role === 'fwd' && k.goals === 1 && z(k) <= -1);
+    for (const a of mids)
+      for (const b of fwds) {
+        pairs++;
+        if (a.score > b.score) wins++;
+      }
+  }
+  return pairs ? wins / pairs : 1;
+}
+
+/** Everything the scale is fitted to or checked against, on any set of rows. */
 function outcomeTargets(rows: readonly RateRow[], model: RatingModel) {
   const ms = scored(rows, model);
-  const winners = (min: number, max = Infinity) =>
-    ms.flatMap((m) =>
-      m.knights
-        .filter(({ k }) => won(m.r, k.team) && k.goals >= min && k.goals <= max)
-        .map(({ score }) => toRating(score)),
-    );
+  const ratingsWhere = (pick: (k: KnightRow, r: RateRow) => boolean) =>
+    ms.flatMap((m) => m.knights.filter(({ k }) => pick(k, m.r)).map(({ score }) => toRating(score)));
+  const fwdGoals =
+    (n: number, max = n) =>
+    (k: KnightRow) =>
+      k.whole && k.role === 'fwd' && k.goals >= n && k.goals <= max;
+  const inDefeat = ratingsWhere((k, r) => fwdGoals(1)(k) && lostByOne(r, k.team));
+  const inWin = ratingsWhere((k, r) => fwdGoals(1)(k) && won(r, k.team));
+  const brace = ratingsWhere((k, r) => k.goals === 2 && won(r, k.team));
+  const hatTrick = ratingsWhere((k, r) => k.goals >= 3 && won(r, k.team));
   const decisive = ms.filter((m) => m.r.score[0] !== m.r.score[1]);
   const motmOf = (m: (typeof ms)[number]) => m.knights.find(({ k }) => k.id === m.motm)?.k;
-  const keepers = ms.flatMap((m) => m.knights.filter(({ k }) => k.whole && k.role === 'gk'));
   const all = ms.flatMap((m) => m.knights);
+  const ratings = all.map(({ score }) => toRating(score));
+  const roleMean = (role: Role) =>
+    mean(all.filter(({ k }) => k.role === role).map(({ score }) => toRating(score)));
   const processPart = all.map(({ k }) => model.spread * standardise(k.value, k.roleSteps, model.roles));
-  // A goalless, assistless defender rated above a winning side's brace scorer in the same match.
-  const braceMatches = ms.filter((m) => m.knights.some(({ k }) => k.goals >= 2 && won(m.r, k.team)));
-  const defenderOver = braceMatches.filter((m) => {
-    const brace = Math.max(
-      ...m.knights.filter(({ k }) => k.goals >= 2 && won(m.r, k.team)).map((q) => q.score),
-    );
-    return m.knights.some(
-      ({ k, score }) => k.role === 'def' && k.goals + k.outcomes.assists === 0 && score > brace,
-    );
-  }).length;
+  const keepers = all.filter(({ k }) => k.whole && k.role === 'gk');
   return {
+    mean: mean(ratings),
+    keeperGap: roleMean('gk') - mean(['def', 'mid', 'fwd'].map((r) => roleMean(r as Role))),
+    goalInDefeat: quantile(inDefeat, 0.5),
+    goalsInDefeat: inDefeat.length,
+    goalInWin: quantile(inWin, 0.5),
+    goalsInWin: inWin.length,
+    brace: quantile(brace, 0.5),
+    braces: brace.length,
+    hatTrick: quantile(hatTrick, 0.5),
+    hatTricks: hatTrick.length,
     goalLift: goalLift(rows, model),
-    brace: quantile(winners(2, 2), 0.5),
-    braces: winners(2, 2).length,
-    hatTrick: quantile(winners(3), 0.5),
-    hatTricks: winners(3).length,
     motmWinShare:
       decisive.filter((m) => {
         const k = motmOf(m);
@@ -625,36 +674,27 @@ function outcomeTargets(rows: readonly RateRow[], model: RatingModel) {
     keeperMotm: ms.filter((m) => motmOf(m)?.role === 'gk').length / (ms.length || 1),
     cleanSheet: mean(keepers.filter(({ k }) => k.conceded === 0).map(({ score }) => toRating(score))),
     processShare: sd(processPart) ** 2 / sd(all.map(({ score }) => score)) ** 2,
-    defenderOverBrace: defenderOver / (braceMatches.length || 1),
+    dominantOverPoorScorer: dominance(ms, model),
+    // Under 6 only for a net negative: a minus in process value, or an own goal (a golden goal's extra
+    // minutes stretch par, so a hair's grace).
+    under6Explained: all.filter(({ k, score }) => score < 5.95 && k.value >= 0 && k.outcomes.ownGoals === 0)
+      .length,
+    under6: all.filter(({ score }) => score < 6).length / (all.length || 1),
   };
 }
 
-/** Lift and spread so the middle 60% of ratings read 6.0–7.5, whatever the outcome weights. */
-function scale(rows: readonly RateRow[], base: Omit<RatingModel, 'lift' | 'spread'>): RatingModel {
-  const parts = rows.flatMap((r) =>
-    r.knights.map((k) => ({
-      z: standardise(k.value, k.roleSteps, base.roles),
-      c: outcomeCredit(k.outcomes, k.roleSteps, { ...base, lift: 0, spread: 0 }),
-    })),
+const NO_OUTCOMES: Outcomes = { goals: 0, assists: 0, ownGoals: 0, saves: 0, cleanSheet: false };
+
+/** A knight who played a whole match and did nothing, for good or ill: the lowest any outfield role reads. */
+const doNothing = (model: RatingModel): number =>
+  Math.min(
+    ...(['def', 'mid', 'fwd'] as const).map((role) =>
+      scoreOf(0, NO_OUTCOMES, { gk: 0, def: 0, mid: 0, fwd: 0, [role]: REGULATION_STEPS }, model),
+    ),
   );
-  const band = (spread: number) => {
-    const xs = parts.map((p) => spread * p.z + p.c);
-    return { lo: quantile(xs, TYPICAL.low), hi: quantile(xs, TYPICAL.high) };
-  };
-  let [a, b] = [0.05, 3];
-  for (let i = 0; i < 40; i++) {
-    const m = (a + b) / 2;
-    const { lo, hi } = band(m);
-    if (hi - lo < TYPICAL.to - TYPICAL.from) a = m;
-    else b = m;
-  }
-  const spread = Math.round(((a + b) / 2) * 1e4) / 1e4;
-  const lift = Math.round((TYPICAL.from - BASE - band(spread).lo) * 1e4) / 1e4;
-  return { ...base, lift, spread };
-}
 
 /** Bisection on a quantity that rises with x. */
-function solve(f: (x: number) => number, target: number, lo: number, hi: number, steps = 20): number {
+function solve(f: (x: number) => number, target: number, lo: number, hi: number, steps = 24): number {
   let [a, b] = [lo, hi];
   for (let i = 0; i < steps; i++) {
     const m = (a + b) / 2;
@@ -664,66 +704,69 @@ function solve(f: (x: number) => number, target: number, lo: number, hi: number,
   return Math.round(((a + b) / 2) * 1e4) / 1e4;
 }
 
+// Five numbers, five targets: lift the ordinary match, spread the match of no worth, the goal weight a
+// forward's single goal, the clean sheet its keepers' mean, the save weight keepers' fairness (in turn).
 function calibrate(value: ValueModel, rows: readonly RateRow[]): { model: RatingModel; lines: string[] } {
   const whole = (role: Role): KnightRow[] =>
     rows.flatMap((r) => r.knights.filter((k) => k.whole && k.role === role));
   const r4 = (x: number): number => Math.round(x * 1e4) / 1e4;
-  const norm = (role: Role): RoleNorm => {
-    const ks = whole(role);
-    const values = ks.map((k) => k.value);
-    return {
-      mean: r4(mean(values)),
-      sd: r4(sd(values)),
-      goals: r4(mean(ks.map((k) => k.outcomes.goals))),
-      assists: r4(mean(ks.map((k) => k.outcomes.assists))),
-      ownGoals: r4(mean(ks.map((k) => k.outcomes.ownGoals))),
-      cleanSheets: r4(mean(ks.map((k) => (k.outcomes.cleanSheet ? 1 : 0)))),
-    };
+  const roles = Object.fromEntries(
+    ROLES.map((r) => {
+      const values = whole(r).map((k) => k.value);
+      return [r, { mean: r4(mean(values)), sd: r4(sd(values)) }];
+    }),
+  ) as Record<Role, RoleNorm>;
+  let model: RatingModel = {
+    value,
+    roles,
+    lift: 0.5,
+    spread: 1,
+    outcome: { goal: 0.5, assist: 0.25, ownGoal: 0.5, save: 0.3, cleanSheet: 0.3 },
+    motmMargin: MOTM_MARGIN,
   };
-  const roles = { gk: norm('gk'), def: norm('def'), mid: norm('mid'), fwd: norm('fwd') };
-  const weights = (goal: number, cleanSheet: number): OutcomeWeights => ({
-    goal,
-    assist: r4(goal * ASSIST_SHARE),
-    ownGoal: goal,
-    cleanSheet,
+  const withGoal = (m: RatingModel, goal: number): RatingModel => ({
+    ...m,
+    outcome: { ...m.outcome, goal, assist: r4(goal * ASSIST_SHARE), ownGoal: goal },
   });
-  const modelFor = (goal: number, cleanSheet: number): RatingModel =>
-    scale(rows, { value, roles, outcome: weights(goal, cleanSheet), motmMargin: MOTM_MARGIN });
-  // For each goal weight, the clean-sheet weight that holds the keeper's clean-sheet mean at its target.
-  const withKeeper = (goal: number): RatingModel =>
-    modelFor(
-      goal,
-      solve((c) => outcomeTargets(rows, modelFor(goal, c)).cleanSheet, CLEAN_SHEET_RATING, 0, 3),
+  const t = (m: RatingModel) => outcomeTargets(rows, m);
+  // An ordinary match (his position's par, nothing decisive) is the base; nothing at all is 6.0.
+  model = { ...model, lift: r4(TARGET.ordinary - BASE) };
+  model = { ...model, spread: solve((x) => -doNothing({ ...model, spread: x }), -TARGET.nothing, 0.05, 2) };
+  const oneGoal = (m: RatingModel) => (t(m).goalInDefeat + t(m).goalInWin) / 2;
+  for (let round = 0; round < 4; round++) {
+    model = withGoal(
+      model,
+      solve((g) => oneGoal(withGoal(model, g)), TARGET.oneGoal, 0, 2),
     );
-  const goal = solve((g) => goalLift(rows, withKeeper(g)), GOAL_LIFT, 0, 2);
-  const model = withKeeper(goal);
-
-  const curve = [0, 0.25, 0.5, 0.75, 1, 1.25].map((g) => {
-    const m = withKeeper(g);
-    const t = outcomeTargets(rows, m);
-    return (
-      `    goal ${f2(g).padStart(5)} · clean sheet ${f2(m.outcome.cleanSheet)}: goal lift ${f2(t.goalLift)}, brace ${f2(t.brace)}, ` +
-      `hat-trick ${f2(t.hatTrick)}, MOTM on winners ${pct(t.motmWinShare)}, keeper MOTM ${pct(t.keeperMotm)}, ` +
-      `process share ${pct(t.processShare)}, defender over brace ${pct(t.defenderOverBrace)}`
-    );
-  });
-  const t = outcomeTargets(rows, model);
+    const keeper = (o: Partial<RatingModel['outcome']>) =>
+      t({ ...model, outcome: { ...model.outcome, ...o } });
+    const cleanSheet = solve((c) => keeper({ cleanSheet: c }).cleanSheet, TARGET.cleanSheet, 0, 3);
+    model = { ...model, outcome: { ...model.outcome, cleanSheet } };
+    model = {
+      ...model,
+      outcome: { ...model.outcome, save: solve((x) => keeper({ save: x }).keeperGap, 0, 0, 2) },
+    };
+  }
+  const got = t(model);
+  const valueMean = (r: Role) => mean(whole(r).map((k) => k.value));
+  const rate = (r: Role, f: (k: KnightRow) => number) => mean(whole(r).map(f));
   return {
     model,
     lines: [
-      `Calibration: ${rows.length} fresh matches. A position's norm is from knights who played a whole match in it:`,
+      `Calibration: ${rows.length} fresh matches. Each position's process value over a whole match, and its outcomes:`,
       ...ROLES.map(
         (r) =>
-          `  ${r.padEnd(4)} value ${f3(roles[r].mean)} ± ${f3(roles[r].sd)} · a match: goals ${f3(roles[r].goals)} ` +
-          `assists ${f3(roles[r].assists)} own goals ${f3(roles[r].ownGoals)} clean sheets ${f3(roles[r].cleanSheets)} ` +
+          `  ${r.padEnd(4)} value ${f3(valueMean(r))} ± ${f3(roles[r].sd)} · a match: goals ${f3(rate(r, (k) => k.goals))} ` +
+          `assists ${f3(rate(r, (k) => k.outcomes.assists))} clean sheets ${f3(rate(r, (k) => (k.outcomes.cleanSheet ? 1 : 0)))} ` +
           `(${whole(r).length} knights)`,
       ),
-      `  outcome weights against targets (each row re-scaled so the middle 60% reads ${TYPICAL.from}–${TYPICAL.to}):`,
-      ...curve,
-      `  chosen: goal ${f3(model.outcome.goal)} (a goal lifts a forward ${f2(t.goalLift)}, target ${GOAL_LIFT}), assist ${f3(model.outcome.assist)}, ` +
-        `own goal −${f3(model.outcome.ownGoal)}, clean sheet ${f3(model.outcome.cleanSheet)} (clean-sheet keepers average ${f2(t.cleanSheet)}); ` +
-        `man of the match margin ${MOTM_MARGIN}`,
-      `  rating = ${BASE} + ${f3(model.lift)} + ${f3(model.spread)} × z + outcomes over par, where z = (value − par) / spread for his minutes and roles`,
+      `  rating = ${BASE} + ${f3(model.lift)} + ${f3(model.spread)} × (value − position par) / (position spread × √time) + ` +
+        `${f3(model.outcome.goal)} a goal + ${f3(model.outcome.assist)} an assist − ${f3(model.outcome.ownGoal)} an own goal + ` +
+        `${f3(model.outcome.save)} a save + ${f3(model.outcome.cleanSheet)} a keeper's clean sheet`,
+      `  fitted to: an ordinary match ${f2(BASE + model.lift)} (${TARGET.ordinary}), a match of no worth ${f2(doNothing(model))} ` +
+        `(${TARGET.nothing}), a forward's single goal ${f2((got.goalInDefeat + got.goalInWin) / 2)} (${TARGET.oneGoal}), ` +
+        `clean-sheet keepers ${f2(got.cleanSheet)} (${TARGET.cleanSheet}), keepers' mean less outfielders' ${f2(got.keeperGap)} (0); ` +
+        `the mean comes out at ${f2(got.mean)}`,
     ],
   };
 }
@@ -771,13 +814,15 @@ function evaluate(rows: readonly RateRow[], model: RatingModel): Verdict {
     if (xs.length) lines.push(`  ${(TIERS[tier]?.name ?? '').padEnd(9)} ${dist(xs)}`);
   }
   const [p20, p80, p95] = [quantile(ratings, 0.2), quantile(ratings, 0.8), quantile(ratings, 0.95)];
-  const inTypical = ratings.filter((r) => r >= TYPICAL.from && r <= TYPICAL.to).length / ratings.length;
   lines.push(
-    `  ${pct(inTypical)} of ratings in ${TYPICAL.from}–${TYPICAL.to}; ${pct(ratings.filter((r) => r >= 8).length / ratings.length)} at 8 or more; ` +
+    `  p20 ${f2(p20)} · p80 ${f2(p80)} · ${pct(ratings.filter((r) => r >= 6 && r <= 7.5).length / ratings.length)} in 6–7.5; ` +
+      `${pct(ratings.filter((r) => r >= 8).length / ratings.length)} at 8 or more; ${pct(ratings.filter((r) => r < 6).length / ratings.length)} under 6, ` +
       `${pct(ratings.filter((r) => r < 5).length / ratings.length)} under 5; clamped at 3 or 10: ${ratings.filter((r) => r <= 3 || r >= 10).length}`,
   );
-  check(Math.abs(p20 - TYPICAL.from) <= CHECKS.typicalBand, `p20 ${f2(p20)} is not about ${TYPICAL.from}`);
-  check(Math.abs(p80 - TYPICAL.to) <= CHECKS.typicalBand, `p80 ${f2(p80)} is not about ${TYPICAL.to}`);
+  lines.push(
+    `  an ordinary match reads ${f2(BASE + model.lift)}, a match of no worth ${f2(doNothing(model))}`,
+  );
+  check(overall.mean >= CHECKS.mean[0] && overall.mean <= CHECKS.mean[1], `mean rating ${f2(overall.mean)}`);
   check(p95 >= CHECKS.standout[0] && p95 <= CHECKS.standout[1], `p95 ${f2(p95)} is not a standout 8–9`);
 
   // The result: a side's mean rating against its goal difference, and where the man of the match plays.
@@ -827,25 +872,27 @@ function evaluate(rows: readonly RateRow[], model: RatingModel): Verdict {
   check(teamCorr >= CHECKS.minTeamGoalDiffCorrelation, `side mean vs goal difference ${f2(teamCorr)}`);
   check(motmShare >= CHECKS.minMotmWinShare, `man of the match on the winning side only ${pct(motmShare)}`);
 
-  // Outcome credit against its targets, on matches the weights never saw.
+  // The scale against its targets, on matches it never saw.
   const t = outcomeTargets(rows, model);
   const bestOverall = outcomeTargets(rows, { ...model, motmMargin: 0 }).motmWinShare;
   lines.push(
-    `  outcomes: a goal lifts a forward ${f2(t.goalLift)}; winning brace median ${f2(t.brace)} (${t.braces}), ` +
-      `hat-trick ${f2(t.hatTrick)} (${t.hatTricks}); keeper MOTM ${pct(t.keeperMotm)}; process value carries ` +
-      `${pct(t.processShare)} of the variance; a goalless defender above a winning brace scorer in ${pct(t.defenderOverBrace)}; ` +
-      `MOTM on the winners ${pct(t.motmWinShare)} (${pct(bestOverall)} without the margin)`,
+    `  a forward's goal: in a one-goal defeat ${f2(t.goalInDefeat)} (${t.goalsInDefeat}), in a win ${f2(t.goalInWin)} (${t.goalsInWin}); ` +
+      `a winning brace ${f2(t.brace)} (${t.braces}), hat-trick ${f2(t.hatTrick)} (${t.hatTricks}); a goal lifts a forward ${f2(t.goalLift)}`,
+    `  keeper MOTM ${pct(t.keeperMotm)}; MOTM on the winners ${pct(t.motmWinShare)} (${pct(bestOverall)} without the margin); ` +
+      `process value carries ${pct(t.processShare)} of the variance; a dominant midfielder beats a poor scorer ${pct(t.dominantOverPoorScorer)}; ` +
+      `under 6 with no net minus or own goal: ${t.under6Explained}`,
   );
   const inside = (x: number, [lo, hi]: readonly [number, number]) => x >= lo && x <= hi;
-  check(inside(t.goalLift, CHECKS.goalLift), `a goal lifts a forward ${f2(t.goalLift)}`);
-  check(inside(t.brace, CHECKS.braceMedian), `winning brace median ${f2(t.brace)}`);
-  check(t.hatTrick > t.brace, `hat-trick median ${f2(t.hatTrick)} not above the brace's`);
+  check(inside(t.goalInDefeat, CHECKS.goalInDefeat), `a goal in a one-goal defeat ${f2(t.goalInDefeat)}`);
+  check(inside(t.goalInWin, CHECKS.goalInWin), `a goal in a win ${f2(t.goalInWin)}`);
+  check(inside(t.brace, CHECKS.braceInWin), `winning brace median ${f2(t.brace)}`);
+  check(t.hatTrick >= CHECKS.minHatTrick, `hat-trick median ${f2(t.hatTrick)}`);
   check(inside(t.keeperMotm, CHECKS.keeperMotmShare), `keepers are man of the match ${pct(t.keeperMotm)}`);
-  check(t.processShare >= CHECKS.minProcessShare, `process value carries only ${pct(t.processShare)}`);
   check(
-    t.defenderOverBrace <= CHECKS.maxDefenderOverBrace,
-    `defenders above brace scorers ${pct(t.defenderOverBrace)}`,
+    t.dominantOverPoorScorer >= CHECKS.minDominantOverPoorScorer,
+    `a dominant midfielder beats a poor one-goal forward only ${pct(t.dominantOverPoorScorer)}`,
   );
+  check(t.under6Explained === 0, `${t.under6Explained} ratings under 6 with nothing negative`);
 
   // Keepers: a rating that follows the goals he let in, as it should, and not only them.
   const keepers = all.filter((k) => k.role === 'gk' && k.whole);
@@ -911,6 +958,71 @@ function actionTable(rows: readonly RateRow[]): string[] {
   return lines;
 }
 
+/** The human-slot jobs: each profile, and the bot in the same slot, in every position at the Knight tier. */
+function humanJobs(): Job[] {
+  return (['bot', ...HUMAN_PROFILES] as const).flatMap((profile) =>
+    ROLES.flatMap((role) =>
+      Array.from({ length: HUMAN_MATCHES }, (_, i) => ({
+        seed: FIRST_HUMAN_SEED + i,
+        tiers: [2, 2] as const,
+        changes: false,
+        human: { profile, role },
+      })),
+    ),
+  );
+}
+
+// Ratings must be fair to how people play: scripted beginners, improvers and decent players against the
+// bot in the same slot and seeds. Worse play may rate lower; a beginner's ordinary match must not sit pinned
+// under 6, and his good one (he scored and won the ball three times or more) should reach 7.
+function humanReport(rows: readonly RateRow[]): Verdict {
+  const lines = [
+    `Human-style play: ${HUMAN_MATCHES} matches per profile and position, home side at the Knight tier.`,
+  ];
+  const failures: string[] = [];
+  for (const profile of ['bot', ...HUMAN_PROFILES] as const) {
+    const mine = rows
+      .filter((r) => r.job.human?.profile === profile)
+      .flatMap((r) => {
+        const role = r.job.human?.role;
+        const k = r.knights.find((q) => q.team === 0 && q.role === role);
+        return k ? [{ k, r }] : [];
+      });
+    const ratings = mine.map(({ k }) => k.rating);
+    const byRole = ROLES.map(
+      (role) =>
+        `${role} ${f2(
+          quantile(
+            mine.filter(({ k }) => k.role === role).map(({ k }) => k.rating),
+            0.5,
+          ),
+        )}`,
+    );
+    const result = (f: (r: RateRow) => boolean) =>
+      f2(
+        quantile(
+          mine.filter(({ r }) => f(r)).map(({ k }) => k.rating),
+          0.5,
+        ),
+      );
+    const good = mine.filter(({ k }) => k.goals >= 1 && k.won >= 3).map(({ k }) => k.rating);
+    lines.push(
+      `  ${profile.padEnd(9)} median ${f2(quantile(ratings, 0.5))} p10 ${f2(quantile(ratings, 0.1))} p90 ${f2(quantile(ratings, 0.9))} ` +
+        `under 6 ${pct(ratings.filter((x) => x < 6).length / (ratings.length || 1))} · ${byRole.join(' ')} · ` +
+        `won ${result((r) => won(r, 0))} drawn ${result((r) => r.score[0] === r.score[1])} lost ${result((r) => won(r, 1))} · ` +
+        `good match ${f2(quantile(good, 0.5))} (${good.length}) · goals ${f2(mean(mine.map(({ k }) => k.goals)))} won ball ${f2(mean(mine.map(({ k }) => k.won)))}`,
+    );
+    if (profile === 'beginner') {
+      const m = quantile(ratings, 0.5);
+      if (m < CHECKS.beginnerMedian[0] || m > CHECKS.beginnerMedian[1])
+        failures.push(`beginner median ${f2(m)}`);
+      if (quantile(good, 0.5) < CHECKS.minBeginnerGood)
+        failures.push(`beginner's good match ${f2(quantile(good, 0.5))}`);
+    }
+  }
+  return { lines, failures };
+}
+
 // ------------------------------------------------------------------ the frozen file
 
 const MODEL_FILE = new URL('../src/stats/value-model.ts', import.meta.url);
@@ -951,8 +1063,23 @@ if (!isMatchWorker)
         model: cal.model,
       })),
     );
-    const verdict = evaluate(evalRows, cal.model);
-    const lines = [...valueFit.lines, '', ...cal.lines, '', ...actionTable(evalRows), '', ...verdict.lines];
+    const humanRows = await runAll<RateRow>(
+      humanJobs().map((job) => ({ kind: 'rate', job, model: cal.model })),
+    );
+    const people = humanReport(humanRows);
+    const judged = evaluate(evalRows, cal.model);
+    const verdict = { lines: judged.lines, failures: [...judged.failures, ...people.failures] };
+    const lines = [
+      ...valueFit.lines,
+      '',
+      ...cal.lines,
+      '',
+      ...actionTable(evalRows),
+      '',
+      ...verdict.lines,
+      '',
+      ...people.lines,
+    ];
     const source = await modelSource(cal.model, valueFit.summary);
     const frozen = readFileSync(MODEL_FILE, 'utf8');
     if (process.env.RATINGS_WRITE === '1' && source !== frozen) {
