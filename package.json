@@ -18,6 +18,7 @@
     "tactics": "vitest run --config scripts/vitest.config.ts --reporter=verbose -t 'tactics report'",
     "attributes": "vitest run --config scripts/vitest.config.ts --reporter=verbose scripts/attributes.sim.ts",
     "stats": "vitest run --config scripts/vitest.config.ts --reporter=verbose -t 'stats report'",
+    "ratings": "vitest run --config scripts/vitest.config.ts --reporter=verbose scripts/ratings.sim.ts",
     "smoke": "vite build && tsx scripts/smoke.ts",
     "og-image": "tsx scripts/og-image.ts"
   },

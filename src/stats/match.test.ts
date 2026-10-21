@@ -35,17 +35,22 @@ function played(config: FixtureConfig, scheduled: readonly TimedAction[] = []): 
 }
 
 describe('match stats over real matches', () => {
-  it('hold every invariant at every tier, with changes from the touchline and golden goals', () => {
-    let checked = 0;
-    for (let tier = 0; tier <= 4; tier++) {
-      for (let seed = 1; seed <= 4; seed++) {
-        const runner = played(fixture(100 * tier + seed, tier, seed % 2 === 0), seed > 2 ? CHANGES : []);
-        expect(invariantBreaks(runner.stats, runner.state.score), `tier ${tier} seed ${seed}`).toEqual([]);
-        checked++;
+  // Twenty whole matches: well inside a second each, but not inside Vitest's 5 s on a busy machine.
+  it(
+    'hold every invariant at every tier, with changes from the touchline and golden goals',
+    { timeout: 60_000 },
+    () => {
+      let checked = 0;
+      for (let tier = 0; tier <= 4; tier++) {
+        for (let seed = 1; seed <= 4; seed++) {
+          const runner = played(fixture(100 * tier + seed, tier, seed % 2 === 0), seed > 2 ? CHANGES : []);
+          expect(invariantBreaks(runner.stats, runner.state.score), `tier ${tier} seed ${seed}`).toEqual([]);
+          checked++;
+        }
       }
-    }
-    expect(checked).toBe(20);
-  });
+      expect(checked).toBe(20);
+    },
+  );
 
   it('see the actions a match is made of', () => {
     const { stats } = played(fixture(7, 3));

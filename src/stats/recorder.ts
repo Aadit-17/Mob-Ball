@@ -14,11 +14,13 @@ import {
   ballFate,
   inDangerZone,
   isProgressive,
+  netBound,
   readKick,
   rivalOf,
 } from './definitions';
 import { tally } from './tally';
 import type { Action, MatchStats, ShotOutcome } from './types';
+import { NO_CELL, stateCell } from './value';
 
 /** A knight's contact with the ball on one step: a kick, or his body. */
 interface Contact {
@@ -102,6 +104,14 @@ export class StatsRecorder {
   private prevCarrier: Knight | null = null;
   private bargeOnCarrier: { attacker: Knight; victimId: number; step: number } | null = null;
 
+  /** The step-by-step trace the ratings value actions from (see Trace). */
+  private readonly cells: number[] = [];
+  private readonly owners: number[] = [];
+  private readonly touchers: number[] = [];
+  private owner: Knight | null = null;
+  /** The net the ball is going into untouched, if any, read again after every touch. */
+  private bound: TeamId | null = null;
+
   constructor(state: MatchState) {
     this.onPitch = state.knights.length;
     for (const k of state.knights) this.counter(k);
@@ -117,13 +127,15 @@ export class StatsRecorder {
       this.liveSteps++;
       for (const k of state.knights) this.counter(k).roleSteps[k.role]++;
       for (const e of events) if (e.type === 'barge') this.barge(state, e, step);
-      for (const c of contacts(state, events)) this.contact(state, c, step);
+      const touched = contacts(state, events);
+      for (const c of touched) this.contact(state, c, step);
       [this.touching, this.touchingNow] = [this.touchingNow, this.touching];
       this.touchingNow.clear();
       this.followCarrier(state, step);
       if (this.pending && step - this.pending.step >= POSSESSION_HOLD) this.confirm();
+      this.trace(state, step, touched.at(-1)?.knight ?? null);
       if (goal) this.goal(state, goal, step);
-    }
+    } else this.trace(state, step, null, false);
     if (state.phase === 'ended') this.finish(state);
   }
 
@@ -141,7 +153,22 @@ export class StatsRecorder {
       this.liveSteps,
       this.onPitch,
       this.lot,
+      { cells: [...this.cells], owners: [...this.owners], touchers: [...this.touchers] },
     );
+  }
+
+  // Possession for valuing: the last knight to touch, except that a rival's touch on a ball still going
+  // into his own net is a deflection and leaves it with the shooter (as the recorder's shots do).
+  private trace(state: MatchState, step: number, toucher: Knight | null, live = true): void {
+    if (live && toucher) {
+      this.bound = netBound(state.ball, state.posts);
+      const owner = this.owner;
+      if (!owner || toucher.team === owner.team || this.bound !== owner.team) this.owner = toucher;
+    }
+    const owner = live ? this.owner : null;
+    this.cells[step] = owner ? stateCell(state, owner.team, this.bound) : NO_CELL;
+    this.owners[step] = owner?.id ?? -1;
+    this.touchers[step] = toucher?.id ?? -1;
   }
 
   private counter(k: Knight): Counters {
@@ -485,6 +512,8 @@ export class StatsRecorder {
     this.touching.clear();
     this.prevCarrier = null;
     this.bargeOnCarrier = null;
+    this.owner = null;
+    this.bound = null;
   }
 
   private finish(state: MatchState): void {

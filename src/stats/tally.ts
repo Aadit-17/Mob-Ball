@@ -1,5 +1,6 @@
 import type { Role, TeamId } from '../game/types';
 import { rivalOf } from './definitions';
+import type { Trace } from './value';
 import { COUNTS, type Action, type Count, type KnightStats, type MatchStats, type TeamStats } from './types';
 
 /** What the recorder counts directly, step by step, rather than from the action log. */
@@ -81,6 +82,7 @@ export function tally(
   liveSteps: number,
   onPitch: number,
   decidedByLot: TeamId | null,
+  trace: Trace,
 ): MatchStats {
   const actions = log.map((a, i) => ({ a, i })).sort((p, q) => p.a.step - q.a.step || p.i - q.i);
   const lines = new Map<number, Line>();
@@ -113,6 +115,7 @@ export function tally(
     knights,
     actions: actions.map((p) => p.a),
     decidedByLot,
+    trace,
   };
 }
 

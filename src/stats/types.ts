@@ -1,4 +1,5 @@
 import type { Role, TeamId } from '../game/types';
+import type { Trace } from './value';
 
 /** What became of a shot: decided by the first knight to touch it, or by the net. */
 export type ShotOutcome =
@@ -135,4 +136,6 @@ export interface MatchStats {
   readonly knights: readonly KnightStats[];
   readonly actions: readonly Action[];
   readonly decidedByLot: TeamId | null;
+  /** The state and possession after every step, for valuing actions. */
+  readonly trace: Trace;
 }

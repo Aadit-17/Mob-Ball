@@ -92,6 +92,20 @@ export function ballFate(ball: Ball, posts: readonly Body[]): BallFate {
   return { goal: null, deadIn: FATE_HORIZON, lineIn };
 }
 
+// A rolling ball loses half its speed a second, so it runs at most speed / ln 2 (plus a step). Walls
+// only turn it across the pitch and only a post (at a goal line) turns it toward one, so a ball whose
+// run along the pitch falls short of the posts ahead of it can score in neither net.
+const REACH = 1 / Math.LN2 + STEP;
+
+/** The side an untouched ball would score for, if any: `ballFate(...).goal`, skipping hopeless balls. */
+export function netBound(ball: Ball, posts: readonly Body[]): TeamId | null {
+  const [left, right] = [ball.x - PITCH.left, PITCH.right - ball.x];
+  const ahead = ball.vx > 0 ? right : ball.vx < 0 ? left : Math.min(left, right);
+  const onPitch = left > 0 && right > 0;
+  if (onPitch && Math.abs(ball.vx) * REACH < ahead - ball.radius - POST.radius) return null;
+  return ballFate(ball, posts).goal;
+}
+
 /** A kick as the stats read it the moment it leaves the foot. */
 export interface KickReading {
   readonly shot: boolean;
