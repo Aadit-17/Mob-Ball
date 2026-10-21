@@ -861,7 +861,9 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* Positioned, so the hidden honour names in the table stay inside the scroll box and never widen the page. */
 .cv-scroll {
+  position: relative;
   overflow-x: auto;
   border-radius: 8px;
 }
