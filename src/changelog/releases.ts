@@ -21,6 +21,43 @@ export interface Release {
 
 export const RELEASES: readonly Release[] = [
   {
+    version: '0.4',
+    date: '2026-10-22',
+    title: 'The Manager',
+    summary:
+      'Run a house for a whole season: draft your knights, pick the side, set tactics and win the league.',
+    changes: [
+      {
+        kind: 'new',
+        text: 'Manager mode: take any of the eight houses through a fourteen-matchday league, home and away. Draws count, and the table is settled on goal difference, goals scored, then head-to-head.',
+      },
+      {
+        kind: 'new',
+        text: 'The draft: pick six knights from a pool of eighty on a 26-point budget against seven rival houses, each with its own style. Your forged knight is in the pool, and any house can sign him.',
+      },
+      {
+        kind: 'new',
+        text: 'Watch your matches at 1×, 2× or 4×, or skip straight to the result: it is the same match either way. Pause to open the dugout and change tactics, swap positions or make your one substitution.',
+      },
+      {
+        kind: 'new',
+        text: 'Tactics that really change how your knights play: how hard they press and when they shoot, plus Charge! and Hold! for the closing minutes.',
+      },
+      {
+        kind: 'new',
+        text: 'Stamina: a knight can start about ten matches of fourteen at full strength. Rest the tired ones, and drag knights between the side and the bench to set your team.',
+      },
+      {
+        kind: 'new',
+        text: 'Top scorers, a Golden Boot, and a league title on your shield for the champions of the realm.',
+      },
+      {
+        kind: 'improved',
+        text: 'Rival houses rotate their squads, keep their best knights out of goal, and use their bench and tactics when a match turns.',
+      },
+    ],
+  },
+  {
     version: '0.3',
     date: '2026-10-16',
     title: 'The Realm Cup',
