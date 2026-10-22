@@ -2,15 +2,10 @@ import { HOUSES } from '../setup/houses';
 import { h, svg } from '../ui/dom';
 import { banner, icon, torches } from '../ui/heraldry';
 import { castleSkyline, crossedSwords, kindShield, waxSeal } from './art';
-import { RELEASES, type ChangeKind, type Release } from './releases';
+import { HORIZON, RELEASES, type ChangeKind, type Release } from './releases';
 import './changelog.css';
 
 const KIND_LABELS: Record<ChangeKind, string> = { new: 'New', improved: 'Improved', fixed: 'Fixed' };
-const HORIZON = [
-  { name: 'Realm Cup', text: 'A knockout tournament against the great houses.' },
-  { name: 'My Career', text: 'Take your knight from village team to royal squad.' },
-  { name: 'Manager', text: 'Run a house: draft knights, set line-ups, win the league.' },
-];
 
 const BANNER_SWAY = [0, -1.3, -2.1, -0.6];
 

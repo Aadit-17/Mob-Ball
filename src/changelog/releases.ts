@@ -170,3 +170,10 @@ export const RELEASES: readonly Release[] = [
 ];
 
 export const LATEST = RELEASES[0];
+
+/** What's coming next, at the foot of the Chronicle. Update it with every release (a test checks it). */
+export const HORIZON: readonly { readonly name: string; readonly text: string }[] = [
+  { name: 'My Career', text: 'Take your knight from village team to royal squad.' },
+  { name: 'Match ratings', text: 'Every knight rated after every match, with a man of the match.' },
+  { name: 'Play on your phone', text: 'Touch controls: a stick to run, buttons to kick and barge.' },
+];
